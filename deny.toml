@@ -54,6 +54,9 @@ skip = [
     # Allow duplicate num-bigint versions - miden-field depends directly on
     # 0.5.x to match p3-field's BigUint type, while miden-crypto still pulls 0.4.x
     { name = "num-bigint" },
+    # Allow syn v2.x next to v3.x - curve25519-dalek-derive (via miden-crypto)
+    # still uses v2 while thiserror-impl moved to v3
+    { name = "syn", version = "2" },
 ]
 skip-tree = [
     # Allow rustc_version v0.2.x - build dependency of miden-miette
