@@ -88,9 +88,14 @@ This is the specification the collector and reporter implement together.
    executes. Its later operations are not counted, so a row that expands to
    five operations is hit once per execution, not five times.
 2. A row with zero operations is hit each time its owning source node starts.
-3. A line's hit count is the maximum over the rows located on it.
-4. A function is hit each time its root source node starts.
-5. Hits are counts. Any consumer that wants booleans truncates at output time.
+3. A row is credited to the line where its location starts. Control rows such
+   as `if.true` and `begin` span their whole block, and crediting every line
+   in the span would mark unexecuted lines as covered.
+4. A line's hit count is the maximum over the rows credited to it, never the
+   sum: one line can hold several instructions, and nested nodes repeat the
+   same control row.
+5. A function is hit each time its root source node starts.
+6. Hits are counts. Any consumer that wants booleans truncates at output time.
 
 ## Branch semantics
 
@@ -101,14 +106,16 @@ instructions.
   arm and the false arm. The assembler always emits both arms, an empty block
   standing in for a missing `else`. An arm's taken count is its child node's
   start count.
-- A `while.true` introduces a loop node with one body child. The "entered"
-  count is the body's start count. The "skipped" count is the number of loop
-  starts whose next step was the loop's end rather than the body; the
-  collector tracks that with a one-step lookahead.
-- Both branch records anchor to the line of the introducing row.
+- A `while.true` is lowered to a split node guarding a loop node: the split's
+  true arm is the loop, its false arm is the empty block taken when the
+  condition is false on entry. The branch is therefore the guard split's, and
+  loop nodes themselves produce no branch record. The loop body's start count
+  is the number of iterations.
+- A branch record anchors to the line where the split's own control row
+  starts. A split never started reports both arms as not executed rather
+  than as zero.
 
-What is not a branch: `exec`, `call`, `dyncall`, assertions, and
-`do.while`-style constructs that always run the body once.
+What is not a branch: `exec`, `call`, `dyncall`, and assertions.
 
 ## Coverage directory and run files
 
@@ -116,9 +123,11 @@ The directory is self-contained. The report step must never need the original
 package files, because packages used by test suites are embedded in binaries
 and never exist on disk.
 
-- `packages/<digest>`: the debug-info section of a package, written once per
-  package digest by the first run that touches it. Identical content from
-  concurrent writers is harmless.
+- `packages/<digest>`: the MAST forest and the debug-info section of a
+  package, written once per package digest by the first run that touches it.
+  The forest is included because the reporter needs node kinds and procedure
+  roots, and the original package may only exist inside a test binary.
+  Identical content from concurrent writers is harmless.
 - `runs/<id>`: a hit map keyed by package digest, source node, and row, plus
   run metadata (test name, entry point, outcome). Written on run completion,
   never appended to.
@@ -134,7 +143,6 @@ Locations are byte ranges in files identified by path, as recorded at build
 time. Those paths may be absolute from another machine or trimmed and
 relative. The reporter resolves them against the current directory, a
 user-supplied source root, and user-supplied prefix mappings, in that order.
-A stored checksum, when present, is verified and a mismatch is reported.
 A file that cannot be found is listed in the summary and skipped; it never
 aborts the report.
 

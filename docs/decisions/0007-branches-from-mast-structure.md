@@ -24,8 +24,16 @@ row's line. Ship this in the MVP.
 - Lines and functions only in the MVP: saves about a day and loses the most
   useful signal; nothing in the data model gets simpler.
 
+## Note added the same day
+
+Implementation showed that the assembler lowers every `while.true` to a split
+node guarding the loop node, with the empty false arm taken when the loop is
+skipped. The skipped case is therefore an ordinary split arm, the collector
+needs no lookahead state, and loop nodes produce no branch record of their
+own. The decision stands; only the mechanism got simpler.
+
 ## Consequences
 
-- The collector keeps a small amount of state across steps for loops.
+- The collector keeps no state across steps.
 - PR comments from octocov show line coverage only; branch coverage shows in
   genhtml and in editor gutters.

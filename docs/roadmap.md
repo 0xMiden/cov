@@ -18,10 +18,11 @@ Scope:
   key that keeps it.
 
 Acceptance:
-- A fixture MASM project with two procedures, an `if.true`/`else`, and a
+- A fixture MASM program with two procedures, an `if.true`/`else`, and a
   `while.true` runs with two different inputs; the merged LCOV shows the
-  expected hit counts, the untaken arm as uncovered, and the skipped loop body
-  as a branch with zero hits. Checked by an integration test.
+  expected hit counts, both arms of the `if` taken once, and the loop guard
+  taken once each way. Checked by an integration test. Known limitation: the
+  `exec` line itself is absent because the assembler emits no row for it.
 - `genhtml` renders the LCOV without warnings; the README documents the step.
 
 Decisions: 0001-0010, 0012.
@@ -43,6 +44,11 @@ Upstream changes required, each a small PR:
   point, so the collector can drop the one-step-at-a-time loop.
 - VM: the test-utils loader must keep library debug info when loading
   libraries into the host, so core-library coverage is attributable.
+- Assembler: emit a debug row for `exec`, `call`, and `syscall` instructions.
+  Today they produce none, so a call-site line is not coverable and does not
+  appear in the report at all.
+- Assembler: record file checksums in the debug info so the reporter can
+  detect sources that drifted from the build.
 - Protocol: a `coverage` feature on the testing crate that wires the
   collector's executor into the mock transaction and the code executor when
   the environment variable is set.
