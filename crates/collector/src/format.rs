@@ -66,7 +66,7 @@ impl Serializable for PackageFile {
 
 impl Deserializable for PackageFile {
     fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
-        read_header(source, PACKAGE_FILE_MAGIC, PACKAGE_FILE_VERSION, "package")?;
+        read_header(source, *PACKAGE_FILE_MAGIC, PACKAGE_FILE_VERSION, "package")?;
         let commitment = Word::read_from(source)?;
         let forest = MastForest::read_from(source)?;
         let len = source.read_usize()?;
@@ -126,7 +126,7 @@ impl Serializable for RunFile {
 
 impl Deserializable for RunFile {
     fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
-        read_header(source, RUN_FILE_MAGIC, RUN_FILE_VERSION, "run")?;
+        read_header(source, *RUN_FILE_MAGIC, RUN_FILE_VERSION, "run")?;
         let name = read_string(source)?;
         let outcome = match source.read_u8()? {
             0 => RunOutcome::Ok,
@@ -152,7 +152,7 @@ impl Deserializable for RunFile {
 /// Checks the magic and version of a file and refuses anything unexpected.
 fn read_header<R: ByteReader>(
     source: &mut R,
-    magic: &[u8; 8],
+    magic: [u8; 8],
     version: u8,
     what: &str,
 ) -> Result<(), DeserializationError> {

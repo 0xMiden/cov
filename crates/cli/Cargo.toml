@@ -19,11 +19,16 @@ path = "src/main.rs"
 
 [dependencies]
 anyhow.workspace = true
-clap.workspace = true
+clap = { workspace = true, features = ["env"] }
 miden-cov.workspace = true
 miden-cov-collector = { workspace = true, features = ["std"] }
 miden-debug-engine.workspace = true
+miden-mast-package = { workspace = true, features = ["std"] }
 
-# TODO: remove once the scaffold is replaced with the CLI implementation.
+[dev-dependencies]
+miden-assembly = { workspace = true, features = ["std"] }
+tempfile.workspace = true
+
+# TODO: remove once `report` and `dump` are wired to the cov crate.
 [package.metadata.cargo-shear]
-ignored = ["miden-cov", "miden-cov-collector", "miden-debug-engine"]
+ignored = ["miden-cov"]

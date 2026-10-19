@@ -1071,11 +1071,14 @@ dependencies = [
 name = "miden-cov"
 version = "0.1.0"
 dependencies = [
+ "miden-assembly",
+ "miden-core",
  "miden-cov-collector",
  "miden-debug-types",
  "miden-mast-package",
- "serde",
+ "miden-processor",
  "serde_json",
+ "tempfile",
  "thiserror",
 ]
 
@@ -1085,9 +1088,12 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "clap",
+ "miden-assembly",
  "miden-cov",
  "miden-cov-collector",
  "miden-debug-engine",
+ "miden-mast-package",
+ "tempfile",
 ]
 
 [[package]]

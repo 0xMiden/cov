@@ -1,5 +1,7 @@
 //! The `miden-cov` command-line tool for collecting and reporting Miden VM code coverage.
 
+mod run;
+
 use clap::{Parser, Subcommand};
 
 /// Code coverage for Miden VM programs.
@@ -14,7 +16,7 @@ struct Cli {
 #[derive(Debug, Subcommand)]
 enum Command {
     /// Execute a program and collect its coverage.
-    Run,
+    Run(Box<run::RunArgs>),
     /// Render a coverage report from collected coverage data.
     Report,
     /// Dump collected coverage data in a human-readable form.
@@ -23,6 +25,7 @@ enum Command {
 
 fn main() -> anyhow::Result<()> {
     match Cli::parse().command {
-        Command::Run | Command::Report | Command::Dump => anyhow::bail!("not implemented"),
+        Command::Run(args) => run::run(*args),
+        Command::Report | Command::Dump => anyhow::bail!("not implemented"),
     }
 }

@@ -1,0 +1,21 @@
+proc double
+    mul.2
+end
+
+proc count_down
+    dup neq.0
+    while.true
+        sub.1
+        dup neq.0
+    end
+    drop
+end
+
+begin
+    if.true
+        exec.double
+    else
+        push.7 drop
+    end
+    exec.count_down
+end
