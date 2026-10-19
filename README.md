@@ -39,14 +39,6 @@ paths as stored in the debug info; use `--source-root <dir>` or
 `--path-prefix-map OLD=NEW` when the sources live elsewhere. `miden-cov dump <run-file>`
 prints the raw hits of one run as JSON.
 
-## Workspace
-
-| Crate | Path | Description |
-| --- | --- | --- |
-| `miden-cov-collector` | [`crates/collector`](crates/collector) | Collects coverage while the VM executes a program. |
-| `miden-cov` | [`crates/cov`](crates/cov) | Maps coverage to source and renders reports. |
-| `miden-cov-cli` | [`crates/cli`](crates/cli) | The `miden-cov` command-line tool. |
-
 ## Building and testing
 
 The toolchain is pinned in `rust-toolchain.toml`. Tests run with
