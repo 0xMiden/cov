@@ -7,7 +7,7 @@ the code is the source of truth for those. If a sentence here and the code
 disagree, find out which one is wrong before changing either.
 
 Decisions and their alternatives are in [decisions/](decisions/README.md).
-Planned work is in [roadmap.md](roadmap.md).
+Planned work is the list of issues linked from the README.
 
 ## Pipeline
 
@@ -76,7 +76,8 @@ between the first two.
   other call of that procedure; only the edge tells the arm's own count.
 - **Run**: one VM execution from entry to termination, recorded as one file.
 - **Coverable**: a row that counts in the denominator. In a MASM package every
-  row is coverable. Filtering is a Rust-source concern (see roadmap).
+  row is coverable. Filtering is a Rust-source concern, planned with Rust
+  support.
 - **Coverage directory**: the on-disk exchange between collection and
   reporting.
 
@@ -189,10 +190,10 @@ library is the target.
 
 LCOV is the primary format and the only one the MVP writes. It is the common
 input of genhtml, octocov, Codecov, Coveralls, and editor coverage gutters.
-Line, function, and branch records are all emitted. Pull request comments
-come from octocov; miden-cov's own contribution to the PR is the hosted HTML
-diff view (see roadmap). A JSON format sized for agents lists uncovered
-regions grouped by function with per-test attribution.
+Line, function, and branch records are all emitted. Pull request comments,
+the rendered HTML, and its storage as a workflow artifact all come from
+octocov; miden-cov renders nothing itself. A JSON format sized for agents
+lists uncovered regions grouped by function with per-test attribution.
 
 ## Documentation policy
 
@@ -200,8 +201,8 @@ regions grouped by function with per-test attribution.
   that the code can confirm or refute.
 - [decisions/](decisions/README.md) is the history: one record per decision,
   append-only, superseded records kept and linked.
-- [roadmap.md](roadmap.md) is the future: phases, acceptance criteria, pending
-  upstream changes.
+- The GitHub issues linked from the README are the future: one per phase,
+  with scope, acceptance criteria, and pending upstream changes in the body.
 - Invariants are named here in one line each and enforced in code with a
   comment giving the reason. Formats and types are documented in rustdoc next
   to the code.

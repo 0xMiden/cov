@@ -10,8 +10,8 @@ work with the usual coverage tooling (`genhtml`, IDE gutters, CI coverage servic
 ## Status
 
 Early development. The MVP measures a standalone MASM program: run it, merge the runs, and
-render LCOV with line, function, and branch coverage. See the [roadmap](docs/roadmap.md)
-for what comes next.
+render LCOV with line, function, and branch coverage. See the roadmap below for what comes
+next.
 
 ## Example report
 
@@ -50,14 +50,15 @@ prints the raw hits of one run as JSON.
 
 ## Roadmap
 
-- [x] Phase 1: pure MASM programs; `run`, `report`, `dump`; LCOV with line, function, and
-      branch coverage
-- [ ] Phase 2: in-test collection for protocol, VM, and user contract tests
-- [ ] Phase 3: Rust programs compiled with the Miden compiler
-- [ ] Phase 4: agent-facing JSON output and a skill for test-writing agents
-- [ ] Phase 5: GitHub integration with PR comments and a hosted HTML diff view
+Each phase is a GitHub issue with its scope and what "done" means.
 
-See the full [roadmap](docs/roadmap.md) for scope and acceptance criteria.
+- [x] [#1](https://github.com/0xMiden/cov/issues/1) Measure coverage of a pure MASM program
+- [ ] [#2](https://github.com/0xMiden/cov/issues/2) Collect coverage from Rust test suites
+      (protocol, VM and user contracts)
+- [ ] [#3](https://github.com/0xMiden/cov/issues/3) Measure coverage of Rust programs compiled
+      with `cargo miden`
+- [ ] [#4](https://github.com/0xMiden/cov/issues/4) Add a JSON report for agents writing tests
+- [ ] [#5](https://github.com/0xMiden/cov/issues/5) Post coverage on PRs with `octocov`
 
 ## Building and testing
 
@@ -78,7 +79,6 @@ Formatting uses a pinned nightly rustfmt; install it with `make install-rustfmt`
 ## Documentation
 
 - [Architecture](docs/architecture.md)
-- [Roadmap](docs/roadmap.md)
 - [Design decisions](docs/decisions/)
 - [Release process](docs/release-process.md)
 
