@@ -9,7 +9,7 @@ use std::{
 
 use anyhow::{Context, bail};
 use clap::Args;
-use miden_cov::{Snapshot, SourceResolver, build_report, dump, lcov, summary};
+use miden_cov::{ReportFilter, Snapshot, SourceResolver, build_report, dump, lcov, summary};
 use miden_cov_collector::dir::CoverageDir;
 
 /// Merge collected runs and render a coverage report.
@@ -31,6 +31,15 @@ pub struct ReportArgs {
     /// `OLD=NEW`. May be given several times; the first matching one wins.
     #[arg(long = "path-prefix-map", value_name = "OLD=NEW", value_parser = parse_prefix_map)]
     path_prefix_maps: Vec<(String, String)>,
+    /// Report only source files matching this glob. May be given several
+    /// times; a file is kept if it matches any. Relative globs such as
+    /// `src/**` match paths relative to the current directory.
+    #[arg(long = "include", value_name = "GLOB")]
+    includes: Vec<String>,
+    /// Leave out source files matching this glob, even if included. May be
+    /// given several times.
+    #[arg(long = "exclude", value_name = "GLOB")]
+    excludes: Vec<String>,
     /// Do not print the summary table.
     #[arg(long)]
     no_summary: bool,
@@ -46,6 +55,7 @@ pub struct DumpArgs {
 
 /// Runs the `report` subcommand.
 pub fn report(args: ReportArgs) -> anyhow::Result<()> {
+    let filter = ReportFilter::new(&args.includes, &args.excludes)?;
     let dir = match args.cov_dir {
         Some(dir) => CoverageDir::new(dir),
         None => CoverageDir::from_env_or_default(),
@@ -55,7 +65,7 @@ pub fn report(args: ReportArgs) -> anyhow::Result<()> {
         bail!("no runs found in coverage directory `{}`", dir.root().display());
     }
     let mut resolver = SourceResolver::new(args.source_root, args.path_prefix_maps);
-    let report = build_report(&snapshot, &mut resolver);
+    let report = build_report(&snapshot, &mut resolver, &filter);
 
     if let Some(path) = &args.lcov {
         write_lcov(&report, path)?;

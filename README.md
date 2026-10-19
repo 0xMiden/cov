@@ -26,10 +26,12 @@ miden-cov run program.masp --inputs inputs-a.toml --name a
 miden-cov run program.masp --inputs inputs-b.toml --name b
 
 # Merge all runs, print a summary table, and write an LCOV trace.
-miden-cov report --lcov lcov.info
+# Linked libraries are reported too when their sources resolve; narrow the
+# report with --include and --exclude path globs.
+miden-cov report --lcov lcov.info --include 'src/**'
 
-# Render HTML from the trace.
-genhtml --branch-coverage --output-directory html lcov.info
+# Render HTML from the trace. --prefix keeps the page tree shallow.
+genhtml --branch-coverage --prefix "$PWD" --output-directory html lcov.info
 ```
 
 Runs go to the coverage directory, `target/miden-cov` by default or `MIDEN_COV_DIR` when

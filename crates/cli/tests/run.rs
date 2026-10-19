@@ -184,6 +184,25 @@ fn report_merges_runs_into_lcov_and_summary() {
         Err(e) => eprintln!("genhtml not available, skipping HTML check: {e}"),
     }
 
+    // Filters drop files from the report, and malformed globs are rejected.
+    let report_with = |flag: &str, glob: &str| {
+        Command::new(env!("CARGO_BIN_EXE_miden-cov"))
+            .arg("report")
+            .arg("--cov-dir")
+            .arg(&cov)
+            .args([flag, glob])
+            .output()
+            .unwrap()
+    };
+    let output = report_with("--exclude", "**/fixture.masm");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(output.status.success(), "{stdout}");
+    assert!(!stdout.contains("fixture.masm"), "{stdout}");
+    let output = report_with("--include", "src/[");
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("invalid glob `src/[`"), "{stderr}");
+
     // dump prints the run as JSON.
     let run_file = fs::read_dir(cov.join("runs")).unwrap().next().unwrap().unwrap().path();
     let output = Command::new(env!("CARGO_BIN_EXE_miden-cov"))

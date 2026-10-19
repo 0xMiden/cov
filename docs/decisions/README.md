@@ -21,3 +21,4 @@ old one is marked superseded and links forward. Never delete a record.
 | [0013](0013-documentation-policy.md) | Map, records, roadmap; the code is the source of truth | accepted |
 | [0014](0014-agent-facing-output.md) | Agent feedback is a JSON of uncovered regions with per-test attribution | accepted |
 | [0015](0015-release-process-from-the-compiler.md) | Release process from the compiler, not the VM | accepted |
+| [0016](0016-aggregate-by-location.md) | Aggregate hits by location; count functions by their first instruction | accepted |

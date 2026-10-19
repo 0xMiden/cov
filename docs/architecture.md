@@ -83,18 +83,27 @@ This is the specification the collector and reporter implement together.
 1. A row with one or more operations is hit each time its first operation
    executes. Its later operations are not counted, so a row that expands to
    five operations is hit once per execution, not five times.
-2. A row with zero operations is hit each time its owning source node starts.
-3. A row is credited to the line where its location starts. Control rows such
-   as `if.true` and `begin` span their whole block, and crediting every line
-   in the span would mark unexecuted lines as covered.
-4. A line's hit count is the maximum over the rows credited to it, never the
-   sum: one line can hold several instructions, and nested nodes repeat the
-   same control row.
-5. A function is hit each time its root source node starts, and its
-   definition line is credited with that count. A procedure whose body is a
-   single basic block has no row of its own on that line, and LCOV consumers
-   reject a function record without a line record.
-6. Hits are counts. Any consumer that wants booleans truncates at output time.
+2. A row with zero operations is coverable only when it belongs to a split
+   node, where it stands for the condition and is hit once per evaluation.
+   Zero-operation rows on join and loop nodes are structural duplicates of
+   the procedure body and of the loop guard and are ignored.
+3. Rows are aggregated by exact location. Rows with the same file and byte
+   range are copies of one instruction, for example a procedure the
+   assembler inlined at several call sites, and their counts are summed.
+4. A location is credited to the line where it starts. Control rows span
+   their whole block, and crediting every line in the span would mark
+   unexecuted lines as covered.
+5. A line's hit count is the maximum over the locations credited to it,
+   never the sum, because one line can hold several instructions that each
+   execute once per pass.
+6. A function is hit each time the first coverable location that belongs to
+   it is hit: the first row in its body, in execution order, whose procedure
+   path is the function's own, stopping at the first conditional or loop.
+   That counts inlined copies and bodies entered from another package, which
+   never start the function's own root node, and skips rows of procedures
+   inlined into the body. Its definition line is credited with that count,
+   because LCOV consumers reject a function record without a line record.
+7. Hits are counts. Any consumer that wants booleans truncates at output time.
 
 ## Branch semantics
 
@@ -107,9 +116,10 @@ instructions.
   start count.
 - A `while.true` is lowered to a split node guarding a loop node: the split's
   true arm is the loop, its false arm is the empty block taken when the
-  condition is false on entry. The branch is therefore the guard split's, and
-  loop nodes themselves produce no branch record. The loop body's start count
-  is the number of iterations.
+  condition is false on entry. The branch counts condition evaluations the
+  way gcov does: the true arm is the number of iterations, the false arm is
+  the number of exits, which is skipped-on-entry plus one exit per loop
+  entry. Loop nodes themselves produce no branch record.
 - A branch record anchors to the line where the split's own control row
   starts. A split never started reports both arms as not executed rather
   than as zero.
@@ -161,6 +171,13 @@ workspace tracks one VM release: the one the debugger engine pins, since the
 CLI cannot move ahead of it. If the protocol moves to a VM release the debugger
 does not yet support, the collector crate alone may pin ahead, because test
 suites need the collector and not the CLI.
+
+## Report scope
+
+Every package a run touched is reported, including linked libraries whose
+sources resolve. Include and exclude path globs narrow the report; there is
+no implicit notion of "the user's package", because for library coverage the
+library is the target.
 
 ## Output policy
 

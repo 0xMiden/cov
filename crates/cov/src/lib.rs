@@ -2,24 +2,26 @@
 //!
 //! The input is a coverage directory written by the collector. [`Snapshot`]
 //! loads it and merges the runs, [`build_report`] applies the coverable rule
-//! with source files found by a [`SourceResolver`], and the [`lcov`],
-//! [`summary`], and [`dump`] modules render the result. Nothing here executes a
-//! program.
+//! with source files found by a [`SourceResolver`] and selected by a
+//! [`ReportFilter`], and the [`lcov`], [`summary`], and [`dump`] modules
+//! render the result. Nothing here executes a program.
 
 use std::path::PathBuf;
 
 pub mod dump;
+pub mod filter;
 pub mod lcov;
 pub mod model;
 pub mod snapshot;
 pub mod source;
 pub mod summary;
 
+pub use filter::ReportFilter;
 pub use model::{BranchCoverage, FileCoverage, FunctionCoverage, Report, build_report};
 pub use snapshot::Snapshot;
 pub use source::SourceResolver;
 
-/// Errors raised while loading a coverage directory.
+/// Errors raised while loading a coverage directory or setting up a report.
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     /// A directory or file of the coverage directory could not be read.
@@ -45,5 +47,14 @@ pub enum Error {
         run: String,
         /// Commitment of the missing package, in hex.
         commitment: String,
+    },
+    /// A file filter glob is malformed.
+    #[error("invalid glob `{glob}`")]
+    InvalidGlob {
+        /// The glob as given.
+        glob: String,
+        /// The underlying error.
+        #[source]
+        source: globset::Error,
     },
 }
