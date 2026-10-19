@@ -95,6 +95,11 @@ fn hits_follow_the_control_flow() {
     // flag = 1 doubles n = 3, so the loop body runs six times.
     let (hits, cycles) = run(&package, 1, 3);
     assert!(cycles > 0);
+    // Each start is also recorded as an edge from the node that started it.
+    assert_eq!(hits.edge_starts.get(&(if_split, then_src)), Some(&1));
+    assert_eq!(hits.edge_starts.get(&(if_split, else_src)), None);
+    assert_eq!(hits.edge_starts.get(&(loop_guard, loop_src)), Some(&1));
+    assert_eq!(hits.edge_starts.get(&(loop_src, body_src)), Some(&6));
     assert_eq!(hits.node_starts.get(&then_src), Some(&1));
     assert_eq!(hits.node_starts.get(&else_src), None);
     assert_eq!(hits.node_starts.get(&loop_src), Some(&1));
@@ -110,6 +115,9 @@ fn hits_follow_the_control_flow() {
 
     // flag = 0 takes the else arm and n = 0 skips the loop entirely.
     let (hits, _) = run(&package, 0, 0);
+    assert_eq!(hits.edge_starts.get(&(if_split, else_src)), Some(&1));
+    assert_eq!(hits.edge_starts.get(&(loop_guard, skip_src)), Some(&1));
+    assert_eq!(hits.edge_starts.get(&(loop_src, body_src)), None);
     assert_eq!(hits.node_starts.get(&then_src), None);
     assert_eq!(hits.node_starts.get(&else_src), Some(&1));
     assert_eq!(hits.node_starts.get(&loop_src), None);

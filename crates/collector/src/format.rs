@@ -25,7 +25,7 @@ pub const PACKAGE_FILE_EXTENSION: &str = "pkg";
 /// Magic prefix of a run file.
 pub const RUN_FILE_MAGIC: &[u8; 8] = b"MCOVRUN\0";
 /// Current run file version.
-pub const RUN_FILE_VERSION: u8 = 1;
+pub const RUN_FILE_VERSION: u8 = 2;
 /// File extension of run files.
 pub const RUN_FILE_EXTENSION: &str = "run";
 

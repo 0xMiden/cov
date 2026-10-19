@@ -216,27 +216,26 @@ pub fn build_report(
 struct PackageView<'a> {
     package: &'a PackageFile,
     hits: &'a PackageHits,
-    /// The parents of every source node, once per edge.
-    parents: Vec<Vec<u32>>,
 }
 
 impl<'a> PackageView<'a> {
     fn new(package: &'a PackageFile, hits: &'a PackageHits) -> Self {
-        let nodes = package.debug_info.nodes();
-        let mut parents = vec![Vec::new(); nodes.len()];
-        for (parent, node) in nodes.iter().enumerate() {
-            for &child in &node.children {
-                if let Some(parents) = parents.get_mut(u32::from(child) as usize) {
-                    parents.push(parent as u32);
-                }
-            }
-        }
-        Self { package, hits, parents }
+        Self { package, hits }
     }
 
     /// How many times source node `node` started.
     fn starts(&self, node: impl Into<u32>) -> u64 {
         self.hits.node_starts.get(&node.into()).copied().unwrap_or(0)
+    }
+
+    /// How many times `child` started as the child of `parent`.
+    ///
+    /// A procedure has one source tree however many places call it, so an
+    /// arm that is a bare `exec` shares its node with every other call of
+    /// that procedure; only the edge recorded by the collector tells the
+    /// arm's own starts.
+    fn starts_from(&self, parent: u32, child: impl Into<u32>) -> u64 {
+        self.hits.edge_starts.get(&(parent, child.into())).copied().unwrap_or(0)
     }
 
     /// The exec node behind a source node.
@@ -295,52 +294,14 @@ impl<'a> PackageView<'a> {
         if let (Some(MastNode::Loop(_)), &[body]) =
             (self.exec(then_node), then_node.children.as_slice())
         {
-            let iterations =
-                self.starts_from(then_arm.into(), body).unwrap_or_else(|| self.starts(body));
+            let iterations = self.starts_from(then_arm.into(), body);
             return Some(Split {
                 arms: [iterations, entered],
                 evaluations: iterations + entered,
             });
         }
-        // One arm determines the other: every evaluation takes exactly one.
-        let arms = match (self.starts_from(node_id, then_arm), self.starts_from(node_id, else_arm))
-        {
-            (Some(taken), Some(not_taken)) => [taken, not_taken],
-            (Some(taken), None) => [taken, entered.saturating_sub(taken)],
-            (None, Some(not_taken)) => [entered.saturating_sub(not_taken), not_taken],
-            // Both arms are procedures also reached from other branches or
-            // loops; their starts are an upper bound.
-            (None, None) => {
-                [self.starts(then_arm).min(entered), self.starts(else_arm).min(entered)]
-            },
-        };
+        let arms = [self.starts_from(node_id, then_arm), self.starts_from(node_id, else_arm)];
         Some(Split { arms, evaluations: entered })
-    }
-
-    /// How many times `child` started as the child of `parent`, if the hits
-    /// tell.
-    ///
-    /// A procedure has one source tree however many places call it, so the
-    /// root of a procedure called from several places has several parents
-    /// and its starts add up over them. A join or a call starts its children
-    /// once per start of its own; subtracting those leaves the starts from
-    /// `parent` when no other parent is a branch or a loop.
-    fn starts_from(&self, parent: u32, child: DebugSourceNodeId) -> Option<u64> {
-        let mut edges = 0;
-        let mut from_others = 0;
-        for &other in self.parents.get(u32::from(child) as usize)? {
-            if other == parent {
-                edges += 1;
-                continue;
-            }
-            let other_node = self.package.debug_info.source_node(other.into())?;
-            match self.exec(other_node)? {
-                MastNode::Join(_) | MastNode::Call(_) => from_others += self.starts(other),
-                _ => return None,
-            }
-        }
-        // A split whose arms are one node cannot tell them apart.
-        (edges == 1).then(|| self.starts(child).saturating_sub(from_others))
     }
 
     /// The location whose count is the number of times a function ran: the

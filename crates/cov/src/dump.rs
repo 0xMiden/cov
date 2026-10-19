@@ -6,9 +6,10 @@ use serde_json::{Value, json};
 /// Renders a run with its raw hits, before any source mapping.
 ///
 /// Shape: `{name, outcome, cycles, packages: [{commitment, node_starts,
-/// op_hits}]}` where `outcome` is `"ok"` or `{"failed": message}`,
-/// `node_starts` is a list of `[node, count]`, and `op_hits` a list of
-/// `[node, op, count]`.
+/// op_hits, edge_starts}]}` where `outcome` is `"ok"` or `{"failed":
+/// message}`, `node_starts` is a list of `[node, count]`, `op_hits` a list
+/// of `[node, op, count]`, and `edge_starts` a list of `[parent, child,
+/// count]`.
 pub fn run_to_json(run: &RunFile) -> Value {
     let outcome = match &run.outcome {
         RunOutcome::Ok => json!("ok"),
@@ -29,6 +30,11 @@ pub fn run_to_json(run: &RunFile) -> Value {
                     .op_hits
                     .iter()
                     .map(|((node, op), count)| json!([node, op, count]))
+                    .collect::<Vec<_>>(),
+                "edge_starts": hits
+                    .edge_starts
+                    .iter()
+                    .map(|((parent, child), count)| json!([parent, child, count]))
                     .collect::<Vec<_>>(),
             })
         })
@@ -54,6 +60,7 @@ mod tests {
         hits.record_node_start(3);
         hits.record_op(3, 1);
         hits.record_op(3, 1);
+        hits.record_edge_start(2, 3);
         let run = RunFile {
             name: "t".into(),
             outcome: RunOutcome::Failed("boom".into()),
@@ -70,6 +77,7 @@ mod tests {
                     "commitment": Word::default().to_hex(),
                     "node_starts": [[3, 1]],
                     "op_hits": [[3, 1, 2]],
+                    "edge_starts": [[2, 3, 1]],
                 }],
             })
         );

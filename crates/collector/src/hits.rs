@@ -19,12 +19,19 @@ pub struct PackageHits {
     /// How many times each operation executed, keyed by (source node id,
     /// padded operation index within the node's basic block).
     pub op_hits: BTreeMap<(u32, u32), u64>,
+    /// How many times each source node started as the child of a given
+    /// parent, keyed by (parent source node id, child source node id).
+    ///
+    /// Needed because a procedure has one source tree however many places
+    /// call it: an `if` arm that is a bare `exec` shares its node with every
+    /// other call of that procedure, and only the edge tells the arms apart.
+    pub edge_starts: BTreeMap<(u32, u32), u64>,
 }
 
 impl PackageHits {
     /// Returns `true` when nothing was recorded.
     pub fn is_empty(&self) -> bool {
-        self.node_starts.is_empty() && self.op_hits.is_empty()
+        self.node_starts.is_empty() && self.op_hits.is_empty() && self.edge_starts.is_empty()
     }
 
     /// Adds every count of `other` into `self`.
@@ -35,12 +42,21 @@ impl PackageHits {
         for (key, count) in &other.op_hits {
             *self.op_hits.entry(*key).or_default() += count;
         }
+        for (key, count) in &other.edge_starts {
+            *self.edge_starts.entry(*key).or_default() += count;
+        }
     }
 
     /// Records one start of `node`.
     #[inline]
     pub fn record_node_start(&mut self, node: u32) {
         *self.node_starts.entry(node).or_default() += 1;
+    }
+
+    /// Records one start of `child` as a child of `parent`.
+    #[inline]
+    pub fn record_edge_start(&mut self, parent: u32, child: u32) {
+        *self.edge_starts.entry((parent, child)).or_default() += 1;
     }
 
     /// Records one execution of operation `op_idx` of `node`.
@@ -63,6 +79,12 @@ impl Serializable for PackageHits {
             target.write_u32(*op_idx);
             target.write_u64(*count);
         }
+        target.write_usize(self.edge_starts.len());
+        for ((parent, child), count) in &self.edge_starts {
+            target.write_u32(*parent);
+            target.write_u32(*child);
+            target.write_u64(*count);
+        }
     }
 }
 
@@ -81,6 +103,13 @@ impl Deserializable for PackageHits {
             let op_idx = source.read_u32()?;
             let count = source.read_u64()?;
             hits.op_hits.insert((node, op_idx), count);
+        }
+        let num_edges = source.read_usize()?;
+        for _ in 0..num_edges {
+            let parent = source.read_u32()?;
+            let child = source.read_u32()?;
+            let count = source.read_u64()?;
+            hits.edge_starts.insert((parent, child), count);
         }
         Ok(hits)
     }

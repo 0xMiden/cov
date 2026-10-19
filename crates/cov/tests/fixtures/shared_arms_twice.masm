@@ -1,0 +1,47 @@
+proc a
+    push.1
+    if.true
+        push.1 drop
+    end
+end
+proc b
+    push.0
+    if.true
+        push.2 drop
+    end
+end
+proc c
+    if.true
+        push.0
+    else
+        push.0
+    end
+end
+proc pick
+    if.true
+        exec.a
+    else
+        exec.b
+    end
+end
+proc pick2
+    if.true
+        exec.b
+    else
+        exec.a
+    end
+end
+begin
+    push.1 exec.pick
+    push.0 exec.pick
+    push.1 exec.pick2
+    push.1 exec.pick2
+    push.1 exec.pick2
+    exec.b
+    push.1 exec.c
+    push.1
+    while.true
+        exec.c
+    end
+    drop
+end

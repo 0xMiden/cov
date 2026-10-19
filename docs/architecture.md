@@ -70,6 +70,10 @@ between the first two.
 - **Location**: a file plus a byte range. Line numbers are not stored; they
   require the source text.
 - **Hit**: one observed execution of a row or a start of a source node.
+- **Edge start**: a start of a source node recorded together with the node
+  that started it. A procedure has one source tree however many places
+  call it, so an `if` arm that is a bare `exec` shares its node with every
+  other call of that procedure; only the edge tells the arm's own count.
 - **Run**: one VM execution from entry to termination, recorded as one file.
 - **Coverable**: a row that counts in the denominator. In a MASM package every
   row is coverable. Filtering is a Rust-source concern (see roadmap).
@@ -112,14 +116,16 @@ instructions.
 
 - An `if.true` introduces a split node with two child source nodes, the true
   arm and the false arm. The assembler always emits both arms, an empty block
-  standing in for a missing `else`. An arm's taken count is its child node's
-  start count.
+  standing in for a missing `else`. An arm's taken count is the number of
+  edge starts from the split to that arm, not the arm node's total starts,
+  which would include every other call of a procedure used as a bare arm.
 - A `while.true` is lowered to a split node guarding a loop node: the split's
   true arm is the loop, its false arm is the empty block taken when the
   condition is false on entry. The branch counts condition evaluations the
-  way gcov does: the true arm is the number of iterations, the false arm is
-  the number of exits, which is skipped-on-entry plus one exit per loop
-  entry. Loop nodes themselves produce no branch record.
+  way gcov does: the true arm is the number of iterations, counted as edge
+  starts from the loop to its body, the false arm is the number of exits,
+  which is skipped-on-entry plus one exit per loop entry. Loop nodes
+  themselves produce no branch record.
 - A branch record anchors to the line where the split's own control row
   starts. A split never started reports both arms as not executed rather
   than as zero.
@@ -137,9 +143,9 @@ and never exist on disk.
   The forest is included because the reporter needs node kinds and procedure
   roots, and the original package may only exist inside a test binary.
   Identical content from concurrent writers is harmless.
-- `runs/<id>`: a hit map keyed by package digest, source node, and row, plus
-  run metadata (test name, entry point, outcome). Written on run completion,
-  never appended to.
+- `runs/<id>`: per package, the node starts, the edge starts, and the
+  operation hits, plus run metadata (test name, outcome, cycles). Written on
+  run completion, never appended to.
 
 Both are versioned binary files using the VM's serialization traits. A
 version bump in either format is a breaking change of the directory and the

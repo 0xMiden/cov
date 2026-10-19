@@ -638,3 +638,75 @@ fn one_file_under_two_paths() {
     assert_functions(&functions(lib), &[("twice", 1, 2), ("inner", 9, 4)]);
     assert_eq!(branches(lib), [(2, true, [2, 0]), (11, true, [1, 3])]);
 }
+
+/// Arms that are bare procedure calls, where the procedures are also arms
+/// of another `if` and are called directly. `a` and `b` share their source
+/// trees between `pick`, `pick2`, and `main`, so node starts cannot tell
+/// the arms apart; the arm counts come from the parent-to-child edges the
+/// collector records. The loop body is a bare call to `c`, which is also
+/// called directly.
+#[test]
+fn shared_arms_in_two_splits_and_a_loop() {
+    let (_tmp, coverage) = coverage_dir();
+    let source = fixture("shared_arms_twice");
+    record_runs(&coverage, &assemble_program(&source), &[&[]]);
+    let report = default_report(&coverage);
+    let file = only_file(&report, &source);
+
+    // pick: true -> a, false -> b (lines 35, 36). pick2: true -> b three
+    // times (37-39). b once directly (40). c directly with 1 (41) and once
+    // as the loop body with the 0 the first call left behind (44).
+    assert_functions(
+        &functions(file),
+        &[
+            ("a", 1, 1),
+            ("b", 7, 5),
+            ("c", 13, 2),
+            ("pick", 20, 2),
+            ("pick2", 27, 3),
+            ("$main", 34, 1),
+        ],
+    );
+    assert_eq!(
+        branches(file),
+        [
+            (3, true, [1, 0]),
+            (9, true, [0, 5]),
+            (14, true, [1, 1]),
+            (21, true, [1, 1]),
+            (28, true, [3, 0]),
+            (43, true, [1, 1]),
+        ]
+    );
+    assert_eq!(
+        file.lines,
+        BTreeMap::from([
+            (1, 1),
+            (2, 1),
+            (3, 1),
+            (4, 1),
+            (7, 5),
+            (8, 5),
+            (9, 5),
+            (10, 0),
+            (13, 2),
+            (14, 2),
+            (15, 1),
+            (17, 1),
+            (20, 2),
+            (21, 2),
+            (27, 3),
+            (28, 3),
+            (34, 1),
+            (35, 1),
+            (36, 1),
+            (37, 1),
+            (38, 1),
+            (39, 1),
+            (41, 1),
+            (42, 1),
+            (43, 2),
+            (46, 1),
+        ])
+    );
+}
