@@ -11,30 +11,26 @@ Planned work is in [roadmap.md](roadmap.md).
 
 ## Pipeline
 
-```
- package with debug info         VM execution              coverage directory
- (.masp: MAST + per-instruction   observed cycle by cycle   packages/<digest>  debug info, once
-  source rows)            --->    by the collector    --->  runs/<id>          hit map per VM run
-                                                                  |
-                                                                  v
-                                                            report: merge runs, resolve sources,
-                                                            compute lines/functions/branches
-                                                                  |
-                                              +-------------------+-------------------+
-                                              v                   v                   v
-                                            LCOV            terminal summary      JSON for agents
-                                      (genhtml, octocov,
-                                       editor gutters)
-```
+Coverage flows through four stages, each handing a plain artifact to the
+next.
 
-The program under measurement is never modified. Coverage is derived from
-observing the VM and from the debug info the assembler or compiler already
-emits into the package. There is no coverage build: any package that keeps its
-debug-info section is measurable.
+1. **A package with debug info.** The assembler or the compiler produces a
+   package whose debug-info section holds one row per source instruction and
+   a tree of source nodes mirroring the MAST. This is the only input; the
+   program is never modified and there is no coverage build.
+2. **Collection.** The collector observes the VM cycle by cycle while the
+   package executes and counts which source nodes started and which
+   operations ran.
+3. **The coverage directory.** Each VM run ends as one run file holding its
+   counts, and each package appears once with its forest and debug info.
+   The directory is the only link between collecting and reporting.
+4. **Reporting.** The reporter merges any number of run files, resolves the
+   source files, applies the coverable rule, and writes LCOV for genhtml,
+   octocov, and editor gutters, a terminal summary, and a JSON view for
+   agents.
 
-Collection and reporting are separate steps joined only by the coverage
-directory. One VM run produces one run file. Reporting merges any number of run
-files, from any number of processes or machines.
+Collection and reporting never run in the same step. Runs from different
+processes or machines merge by landing in the same directory.
 
 ## Crates
 
