@@ -94,7 +94,10 @@ This is the specification the collector and reporter implement together.
 4. A line's hit count is the maximum over the rows credited to it, never the
    sum: one line can hold several instructions, and nested nodes repeat the
    same control row.
-5. A function is hit each time its root source node starts.
+5. A function is hit each time its root source node starts, and its
+   definition line is credited with that count. A procedure whose body is a
+   single basic block has no row of its own on that line, and LCOV consumers
+   reject a function record without a line record.
 6. Hits are counts. Any consumer that wants booleans truncates at output time.
 
 ## Branch semantics
