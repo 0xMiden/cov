@@ -1093,6 +1093,7 @@ dependencies = [
  "miden-cov-collector",
  "miden-debug-engine",
  "miden-mast-package",
+ "serde_json",
  "tempfile",
 ]
 

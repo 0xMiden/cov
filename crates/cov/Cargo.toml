@@ -17,20 +17,14 @@ edition.workspace = true
 doctest = false
 
 [dependencies]
+miden-core = { workspace = true, features = ["std"] }
 miden-cov-collector = { workspace = true, features = ["std"] }
 miden-debug-types = { workspace = true, features = ["std"] }
-miden-mast-package = { workspace = true, features = ["std"] }
-serde = { workspace = true, features = ["std"] }
 serde_json = { workspace = true, features = ["std"] }
 thiserror = { workspace = true, features = ["std"] }
 
-# TODO: remove once the scaffold is replaced with the report implementation.
-[package.metadata.cargo-shear]
-ignored = [
-    "miden-cov-collector",
-    "miden-debug-types",
-    "miden-mast-package",
-    "serde",
-    "serde_json",
-    "thiserror",
-]
+[dev-dependencies]
+miden-assembly = { workspace = true, features = ["std"] }
+miden-mast-package = { workspace = true, features = ["std"] }
+miden-processor = { workspace = true, features = ["std"] }
+tempfile.workspace = true
