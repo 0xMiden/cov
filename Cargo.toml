@@ -8,7 +8,6 @@ members = [
     "crates/cli",
     "crates/collector",
     "crates/cov",
-    "tools/release-policy",
 ]
 
 [workspace.package]
@@ -28,8 +27,6 @@ edition = "2024"
 [workspace.dependencies]
 anyhow = "1.0"
 clap = { version = "4.5", features = ["derive"] }
-semver = { version = "1.0", default-features = false }
-serde = { version = "1.0", default-features = false, features = ["alloc", "derive"] }
 serde_json = { version = "1.0", default-features = false, features = ["alloc"] }
 tempfile = { version = "3.18", default-features = false }
 thiserror = { version = "2.0", default-features = false }

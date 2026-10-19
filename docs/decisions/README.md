@@ -17,6 +17,7 @@ old one is marked superseded and links forward. Never delete a record.
 | [0009](0009-input-is-a-package-with-debug-info.md) | Input is a package that kept its debug info; no coverage build | accepted |
 | [0010](0010-lcov-primary-output.md) | LCOV is the primary output; octocov for PR comments | accepted |
 | [0011](0011-test-suite-activation.md) | Test suites activate coverage through a feature plus an environment variable | accepted |
-| [0012](0012-repository-organization.md) | Crates under `crates/`; VM-style Makefile, CI, and release; compiler-style Cargo conventions | accepted |
+| [0012](0012-repository-organization.md) | Crates under `crates/`; VM-style Makefile, CI, and release; compiler-style Cargo conventions | accepted, release part superseded by 0015 |
 | [0013](0013-documentation-policy.md) | Map, records, roadmap; the code is the source of truth | accepted |
 | [0014](0014-agent-facing-output.md) | Agent feedback is a JSON of uncovered regions with per-test attribution | accepted |
+| [0015](0015-release-process-from-the-compiler.md) | Release process from the compiler, not the VM | accepted |

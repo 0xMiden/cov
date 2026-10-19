@@ -68,6 +68,7 @@ Formatting uses a pinned nightly rustfmt; install it with `make install-rustfmt`
 - [Architecture](docs/architecture.md)
 - [Roadmap](docs/roadmap.md)
 - [Design decisions](docs/decisions/)
+- [Release process](docs/release-process.md)
 
 ## Contributing
 

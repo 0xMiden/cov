@@ -1,6 +1,6 @@
 # 0012: Crates under `crates/`; VM-style Makefile, CI, and release; compiler-style Cargo conventions
 
-Status: accepted (2026-10-19)
+Status: accepted (2026-10-19); the release part is superseded by [0015](0015-release-process-from-the-compiler.md)
 
 ## Context
 

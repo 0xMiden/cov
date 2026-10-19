@@ -1,0 +1,43 @@
+# Authoritative release policy for this repository.
+#
+# Every workspace package must appear here exactly once. Classification is
+# explicit rather than inferred from directory layout, so that adding a package
+# forces a deliberate decision about whether it is published.
+#
+# See docs/release-process.md for this repository's process.
+
+schema-version = 2
+
+# --- units --------------------------------------------------------------------
+
+[units.cov]
+kind = "crates"
+version-source = "workspace"
+tag = "v{version}"
+changelog = "CHANGELOG.md"
+changelog-headings = [
+    "Coverage and `miden-cov`",
+    "Libraries and public APIs",
+    "Migration and breaking changes",
+]
+latest = true
+# The release workflow's matrix builds `miden-cov-${target}.tar.gz` for two
+# targets. Both route here.
+assets = ["miden-cov-*.tar.gz"]
+required-assets = ["miden-cov-*.tar.gz"]
+
+# --- cov unit -----------------------------------------------------------------
+# Listed in dependency order. The publication order itself is derived by
+# `release-tool package-order`, not taken from this list.
+
+[[packages]]
+name = "miden-cov-collector"
+unit = "cov"
+
+[[packages]]
+name = "miden-cov"
+unit = "cov"
+
+[[packages]]
+name = "miden-cov-cli"
+unit = "cov"

@@ -105,6 +105,12 @@ For example, a new change to the collector crate might have the following messag
 ### Versioning
 We use [semver](https://semver.org/) naming convention.
 
+### Releases
+Maintainers release from `main` with `release-tool`, driven by [`.release/`](./.release/config.toml)
+and the `release` workflow. The procedure is in [docs/release-process.md](docs/release-process.md).
+A pull request that adds a workspace crate must classify it in `.release/config.toml`;
+`make release-lint` checks this.
+
 &nbsp;
 
 ## Pre-PR checklist

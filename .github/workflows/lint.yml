@@ -63,8 +63,6 @@ jobs:
   clippy:
     name: clippy stable on ubuntu-latest
     runs-on: ubuntu-latest
-    env:
-      RUSTFLAGS: -D warnings
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -73,8 +71,7 @@ jobs:
         uses: ./.github/actions/cleanup-runner
       - name: Clippy
         run: |
-          rustup update --no-self-update stable
-          rustup +stable component add clippy
+          rustup update --no-self-update
           make clippy
 
   rustfmt:
