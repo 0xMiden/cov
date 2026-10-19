@@ -49,6 +49,10 @@ Upstream changes required, each a small PR:
   appear in the report at all.
 - Assembler: record file checksums in the debug info so the reporter can
   detect sources that drifted from the build.
+- Assembler: when two procedures have identical bodies, MAST deduplicates
+  them into one exec node and the debug info credits calls to one procedure
+  to the other's source tree. Totals are right, per-procedure attribution is
+  swapped. Attribution by call site would need the call site recorded.
 - Protocol: a `coverage` feature on the testing crate that wires the
   collector's executor into the mock transaction and the code executor when
   the environment variable is set.
