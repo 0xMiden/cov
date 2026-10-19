@@ -54,6 +54,6 @@ that the single-file fixture could not reveal:
 
 ## Consequences
 
-- A call site line still has no row and stays absent (see roadmap).
+- A call site line still has no row and stays absent (upstream item in #2).
 - Rust-compiled packages need their own look at the per-location sum rule
   before phase 3 ships.

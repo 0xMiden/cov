@@ -30,6 +30,6 @@ run file; no state is shared between tests.
 
 ## Consequences
 
-- Two upstream PRs, listed in the roadmap.
+- Two upstream PRs, listed in #2.
 - The collector's executor must satisfy the protocol's trait exactly, which
   ties the collector's VM pin to the protocol's (see 0005).

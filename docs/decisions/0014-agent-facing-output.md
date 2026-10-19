@@ -15,7 +15,7 @@ The report step can emit a JSON document listing uncovered regions grouped by
 function, each with a short source excerpt and location, plus for each file
 the tests that touched it. Hit counts are kept per run so the attribution is
 exact. A skill or equivalent instruction set wraps the CLI for agents. This is
-phase 4 of the roadmap; the run file records the test name from the start so
+#4; the run file records the test name from the start so
 no data is lost before then.
 
 ## Alternatives

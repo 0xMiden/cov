@@ -20,7 +20,9 @@ Three kinds of document under `docs/`:
   confirm or refute.
 - Decision records: one per decision, append-only, superseded ones kept and
   linked.
-- The roadmap: phases, acceptance criteria, pending upstream changes.
+- The roadmap: phases, acceptance criteria, pending upstream changes. Moved
+  the same day to one GitHub issue per phase, indexed from the README; the
+  issue body is the single statement of scope and of "done".
 
 Invariants are named in the map in one line and enforced in code with a
 comment giving the reason. Types and formats are documented in rustdoc. A

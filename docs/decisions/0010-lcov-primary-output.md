@@ -17,6 +17,12 @@ comments come from octocov reading the LCOV; miden-cov's contribution to the
 PR is the link to the hosted HTML diff. Other formats are added only when a
 consumer needs them.
 
+## Note added the same day
+
+octocov renders the HTML and stores it as a workflow artifact, so no
+renderer or hosting is built here. The HTML diff part of the decision is
+dropped; the rest stands. Tracked in #5.
+
 ## Alternatives
 
 - Own HTML from day one: duplicates genhtml for the MVP's purpose.
@@ -26,4 +32,4 @@ consumer needs them.
 ## Consequences
 
 - Branch coverage is visible in genhtml and editors; octocov shows lines.
-- Phase 5 adds the renderer and hosting (see roadmap).
+- ~~Phase 5 adds the renderer and hosting.~~ Dropped, see the note above.

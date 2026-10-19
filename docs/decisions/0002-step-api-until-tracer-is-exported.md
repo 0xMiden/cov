@@ -31,7 +31,7 @@ backend without changing the observer or the run file.
 
 ## Consequences
 
-- Per-cycle overhead of stepping is unmeasured; the roadmap requires a
-  measurement before in-test collection ships (phase 2).
+- Per-cycle overhead of stepping is unmeasured; #2 requires a measurement
+  before in-test collection ships.
 - The backend is an internal seam; nothing outside the collector may depend on
   which one is in use.
