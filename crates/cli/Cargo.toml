@@ -1,0 +1,29 @@
+[package]
+name = "miden-cov-cli"
+description = "Command-line interface for collecting and reporting Miden VM code coverage"
+version.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+categories.workspace = true
+keywords.workspace = true
+license.workspace = true
+readme.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "miden-cov"
+path = "src/main.rs"
+
+[dependencies]
+anyhow.workspace = true
+clap.workspace = true
+miden-cov.workspace = true
+miden-cov-collector = { workspace = true, features = ["std"] }
+miden-debug-engine.workspace = true
+
+# TODO: remove once the scaffold is replaced with the CLI implementation.
+[package.metadata.cargo-shear]
+ignored = ["miden-cov", "miden-cov-collector", "miden-debug-engine"]

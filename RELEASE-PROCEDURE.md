@@ -1,0 +1,67 @@
+# miden-cov release procedure
+
+Stable releases are cut from `main`, release candidates (`vX.Y.Z-rc.N`) from `next`, and
+patch releases from `release/vX.Y.Z` or `release-vX.Y.Z` branches. `tools/release-policy`
+enforces this mapping.
+
+## Choose the scope
+
+Leave `packages` empty for a full release. Every publishable crate must have an
+unused version.
+
+Set `packages` for a limited release, such as a patch or minor release of one
+crate. Include every workspace dependency whose required version is not yet on
+crates.io.
+
+The `packages` input limits crates.io publication only. The workflow still
+creates a repository tag, builds the `miden-cov` binaries, and publishes a GitHub
+release. It cannot publish only to crates.io.
+
+For crates below version 1.0, a minor bump is incompatible. For example,
+`0.1.1` to `0.2.0` may remove public API. A compatible fix uses a patch bump
+such as `0.1.1` to `0.1.2`.
+
+## Prepare the release commit
+
+- Give each selected crate an unused version.
+- Give `miden-cov` an unused version in its package manifest for the repository tag, including limited releases.
+- Update the selected crates' entries in `[workspace.dependencies]` in the root `Cargo.toml`, where those entries exist.
+- Update `Cargo.lock`.
+- Generate the `CHANGELOG.md` section for the release from the commit messages and date it.
+  Name the crate in the heading for a limited release.
+
+Bump a downstream crate only when it must publish a new dependency requirement.
+Commit all release changes to the selected branch before continuing.
+
+## Check and publish
+
+Check the exact package list locally, then run the same list through the dry run.
+Set `release_branch` to the selected branch. The examples below show a stable release from `main`.
+
+```bash
+release_branch=main
+release_tag="$(cargo metadata --locked --no-deps --format-version 1 | jq -r '.packages[] | select(.name == "miden-cov") | "v" + .version')"
+scripts/check-package-release-plan.sh miden-cov-collector
+
+gh workflow run workspace-dry-run.yml \
+  --ref "$release_branch" \
+  -f packages="miden-cov-collector"
+```
+
+Publish from the
+[Actions page](https://github.com/0xMiden/cov/actions), or use `gh`.
+
+```bash
+gh workflow run workspace-publish.yml \
+  --ref "$release_branch" \
+  -f tag="$release_tag" \
+  -f packages="miden-cov-collector"
+```
+
+Use the same package list for every command. Leave `packages` out for a full
+release. The publish workflow rejects versions that already exist on crates.io.
+Set `allow_existing=true` only when resuming a partial publish.
+
+After the workflow finishes, check the
+[GitHub release](https://github.com/0xMiden/cov/releases) and every selected
+crate on crates.io.

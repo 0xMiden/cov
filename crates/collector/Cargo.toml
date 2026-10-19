@@ -1,0 +1,38 @@
+[package]
+name = "miden-cov-collector"
+description = "Execution coverage collection for Miden VM programs"
+version.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+categories.workspace = true
+keywords.workspace = true
+license.workspace = true
+readme.workspace = true
+edition.workspace = true
+
+[lib]
+doctest = false
+
+[features]
+default = ["std"]
+std = [
+    "miden-core/std",
+    "miden-debug-types/std",
+    "miden-mast-package/std",
+    "miden-processor/std",
+    "thiserror/std",
+]
+
+[dependencies]
+miden-core.workspace = true
+miden-debug-types.workspace = true
+miden-mast-package.workspace = true
+miden-processor.workspace = true
+thiserror.workspace = true
+
+# TODO: remove once the scaffold is replaced with the collector implementation.
+[package.metadata.cargo-shear]
+ignored = ["miden-core", "miden-debug-types", "miden-mast-package", "miden-processor", "thiserror"]

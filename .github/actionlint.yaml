@@ -1,0 +1,4 @@
+# Allow actionlint to recognize custom runner labels. Workflows currently run only on
+# GitHub-hosted runners, so the list is empty.
+self-hosted-runner:
+  labels: []

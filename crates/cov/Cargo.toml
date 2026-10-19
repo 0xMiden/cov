@@ -1,0 +1,36 @@
+[package]
+name = "miden-cov"
+description = "Coverage reports for Miden VM programs mapped to source through package debug info"
+version.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+categories.workspace = true
+keywords.workspace = true
+license.workspace = true
+readme.workspace = true
+edition.workspace = true
+
+[lib]
+doctest = false
+
+[dependencies]
+miden-cov-collector = { workspace = true, features = ["std"] }
+miden-debug-types = { workspace = true, features = ["std"] }
+miden-mast-package = { workspace = true, features = ["std"] }
+serde = { workspace = true, features = ["std"] }
+serde_json = { workspace = true, features = ["std"] }
+thiserror = { workspace = true, features = ["std"] }
+
+# TODO: remove once the scaffold is replaced with the report implementation.
+[package.metadata.cargo-shear]
+ignored = [
+    "miden-cov-collector",
+    "miden-debug-types",
+    "miden-mast-package",
+    "serde",
+    "serde_json",
+    "thiserror",
+]

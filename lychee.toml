@@ -1,0 +1,13 @@
+#############################  Exclusions  #############################
+
+# Exclude URLs and mail addresses from checking (supports regex).
+exclude = [
+    '^https://www.gnu.org/software/make/manual/make\.html$',  # GNU make manual
+]
+
+# Exclude these filesystem paths from getting checked.
+exclude_path = [
+    ".git/*",
+    "node_modules/*",
+    "target/*",
+]

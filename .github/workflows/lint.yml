@@ -1,0 +1,107 @@
+# Runs linting related jobs.
+
+name: lint
+
+permissions:
+  contents: read
+  pull-requests: read
+
+on:
+  push:
+    branches: [main, next]
+  pull_request:
+    types: [opened, reopened, synchronize]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' || github.event_name == 'pull_request_target' }}
+
+jobs:
+  cargo-deny:
+    name: cargo-deny on ubuntu-latest
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install cargo-deny
+        run: cargo install cargo-deny --version 0.19.1 --locked
+      - name: Check dependencies with cargo-deny
+        run: cargo deny check
+
+  cargo-shear:
+    name: cargo-shear on ubuntu-latest
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install cargo-shear
+        run: cargo install cargo-shear --version 1.11.2 --locked
+      - name: Check for unused dependencies
+        run: make shear
+
+  workspace-inheritance:
+    name: workspace inheritance on ubuntu-latest
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # Do not pin taiki-e's moving tool shortcut tags by hash. Pin a released
+      # install-action commit and set tool explicitly, or zizmor's
+      # impostor-commit audit can flag stale shortcut-tag hashes.
+      - name: Install cargo-binstall
+        uses: taiki-e/install-action@83ac0ad63c0167e6f06796fab0fce28db1bf3db0 # v2.87.22
+        with:
+          tool: cargo-binstall
+      - name: Install workspace inheritance checker
+        run: cargo binstall --no-confirm cargo-workspace-inheritance-check@1.2.0
+      - name: Check workspace inheritance
+        run: cargo workspace-inheritance-check --promotion-threshold 2 --promotion-failure
+
+  clippy:
+    name: clippy stable on ubuntu-latest
+    runs-on: ubuntu-latest
+    env:
+      RUSTFLAGS: -D warnings
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Cleanup large tools for build space
+        uses: ./.github/actions/cleanup-runner
+      - name: Clippy
+        run: |
+          rustup update --no-self-update stable
+          rustup +stable component add clippy
+          make clippy
+
+  rustfmt:
+    name: rustfmt check nightly on ubuntu-latest
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Cleanup large tools for build space
+        uses: ./.github/actions/cleanup-runner
+      - name: Rustfmt
+        run: |
+          make install-rustfmt
+          make format-check
+
+  doc:
+    name: doc stable on ubuntu-latest
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Cleanup large tools for build space
+        uses: ./.github/actions/cleanup-runner
+      - name: Build docs
+        run: |
+          rustup +stable update --no-self-update
+          rustup default stable
+          make doc

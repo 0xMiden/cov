@@ -1,0 +1,79 @@
+[workspace]
+resolver = "3"
+# NOTE: Workspace members are listed explicitly rather than with globs. Globs allow
+# stray directories (e.g. leftover build output from another branch) to break every
+# Cargo command, and they let a new package join the release surface without an
+# explicit decision.
+members = [
+    "crates/cli",
+    "crates/collector",
+    "crates/cov",
+    "tools/release-policy",
+]
+
+[workspace.package]
+version = "0.1.0"
+rust-version = "1.96.1"
+authors = ["Miden contributors"]
+description = "Code coverage for Miden VM programs"
+repository = "https://github.com/0xMiden/cov"
+homepage = "https://github.com/0xMiden/cov"
+documentation = "https://github.com/0xMiden/cov"
+categories = ["development-tools::testing"]
+keywords = ["coverage", "miden", "lcov"]
+license = "MIT"
+readme = "README.md"
+edition = "2024"
+
+[workspace.dependencies]
+anyhow = "1.0"
+clap = { version = "4.5", features = ["derive"] }
+semver = { version = "1.0", default-features = false }
+serde = { version = "1.0", default-features = false, features = ["alloc", "derive"] }
+serde_json = { version = "1.0", default-features = false, features = ["alloc"] }
+tempfile = { version = "3.18", default-features = false }
+thiserror = { version = "2.0", default-features = false }
+
+# Miden Dependencies
+miden-core = { version = "0.35.0", default-features = false }
+miden-debug-engine = "0.18.0"
+miden-debug-types = { version = "0.35.0", default-features = false }
+miden-mast-package = { version = "0.35.0", default-features = false }
+miden-processor = { version = "0.35.0", default-features = false }
+
+# Workspace crates
+miden-cov = { version = "0.1.0", path = "crates/cov" }
+miden-cov-collector = { version = "0.1.0", path = "crates/collector", default-features = false }
+
+[profile.dev]
+lto = false
+codegen-units = 1
+
+# Keep only file/line debug information for non-workspace dependencies. Full
+# debug information for the Miden VM stack and the other external crates is the
+# dominant cost of the target directory: it multiplies into every statically
+# linked test executable. Workspace crates are not matched by `"*"` and keep
+# full debug information.
+[profile.dev.package."*"]
+debug = "line-tables-only"
+
+[profile.release]
+opt-level = 2
+debug = true
+codegen-units = 1
+lto = "fat"
+
+# Speed up the test profile (VM execution)
+# ============================================================
+[profile.test.package.miden-processor]
+opt-level = 3
+
+[profile.test.package.miden-core]
+opt-level = 3
+
+[profile.test.package.miden-crypto]
+opt-level = 3
+
+# NOTE: add `[profile.test.package.miden-assembly]` with `opt-level = 3` once
+# miden-assembly enters the dependency graph; Cargo warns about unmatched specs.
+# ============================================================
