@@ -20,19 +20,16 @@ doctest = false
 default = ["std"]
 std = [
     "miden-core/std",
-    "miden-debug-types/std",
     "miden-mast-package/std",
     "miden-processor/std",
-    "thiserror/std",
 ]
 
 [dependencies]
 miden-core.workspace = true
-miden-debug-types.workspace = true
 miden-mast-package.workspace = true
 miden-processor.workspace = true
-thiserror.workspace = true
 
-# TODO: remove once the scaffold is replaced with the collector implementation.
-[package.metadata.cargo-shear]
-ignored = ["miden-core", "miden-debug-types", "miden-mast-package", "miden-processor", "thiserror"]
+[dev-dependencies]
+miden-assembly = { workspace = true, features = ["std"] }
+miden-mast-package = { workspace = true, features = ["std"] }
+tempfile.workspace = true
