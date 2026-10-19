@@ -39,6 +39,17 @@ paths as stored in the debug info; use `--source-root <dir>` or
 `--path-prefix-map OLD=NEW` when the sources live elsewhere. `miden-cov dump <run-file>`
 prints the raw hits of one run as JSON.
 
+## Roadmap
+
+- [x] Phase 1: pure MASM programs; `run`, `report`, `dump`; LCOV with line, function, and
+      branch coverage
+- [ ] Phase 2: in-test collection for protocol, VM, and user contract tests
+- [ ] Phase 3: Rust programs compiled with the Miden compiler
+- [ ] Phase 4: agent-facing JSON output and a skill for test-writing agents
+- [ ] Phase 5: GitHub integration with PR comments and a hosted HTML diff view
+
+See the full [roadmap](docs/roadmap.md) for scope and acceptance criteria.
+
 ## Building and testing
 
 The toolchain is pinned in `rust-toolchain.toml`. Tests run with
