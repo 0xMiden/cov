@@ -1,0 +1,5 @@
+use fixtures::entry_lib
+
+begin
+    exec.entry_lib::entry
+end

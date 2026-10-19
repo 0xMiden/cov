@@ -1,0 +1,42 @@
+proc work
+    dup
+    if.true
+        push.1 drop
+    end
+    drop
+end
+
+proc other
+    dup
+    if.true
+        push.2 drop
+    end
+    drop
+end
+
+proc step
+    dup
+    if.true
+        push.3 drop
+    end
+    drop
+end
+
+begin
+    exec.work
+    exec.other
+    exec.step
+    if.true
+        exec.work
+    else
+        exec.other
+    end
+    if.true
+        exec.work
+    else
+        push.9 drop
+    end
+    while.true
+        exec.step
+    end
+end

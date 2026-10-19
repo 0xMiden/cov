@@ -1,23 +1,20 @@
 //! Collects runs of MASM programs assembled from files and checks the report,
 //! the LCOV output, file filters, and source resolution end to end.
 
+mod common;
+
 use std::{
     collections::BTreeMap,
     fs,
     path::{Path, PathBuf},
     process::Command,
-    sync::Arc,
 };
 
-use miden_assembly::Assembler;
-use miden_core::{Felt, mast::MastNode};
-use miden_cov::{
-    BranchCoverage, FileCoverage, FunctionCoverage, Report, ReportFilter, Snapshot, SourceResolver,
-    build_report,
+use common::{
+    assert_functions, branches, collect_runs, default_report, functions, only_file, report,
 };
-use miden_cov_collector::{Observer, RunOutcome, dir::CoverageDir, run_to_end};
-use miden_mast_package::Package;
-use miden_processor::{DefaultHost, FastProcessor, StackInputs};
+use miden_cov::{ReportFilter, SourceResolver};
+use miden_cov_collector::dir::CoverageDir;
 
 /// Two procedures, an if/else, and a loop guarded by the split the assembler
 /// wraps around every `while.true`. `proc double` is line 1.
@@ -77,127 +74,17 @@ begin
 end
 ";
 
-/// Writes `src` to `dir/name.masm`, assembles it from the file, and records
-/// one run per stack into `dir/cov`.
-fn collect_runs(dir: &Path, name: &str, src: &str, stacks: &[&[u64]]) -> (PathBuf, CoverageDir) {
-    let source = dir.join(format!("{name}.masm"));
-    fs::write(&source, src).unwrap();
-    let package: Arc<Package> =
-        Arc::from(Assembler::default().assemble_program(name, source.clone()).unwrap());
-    let coverage = CoverageDir::new(dir.join("cov"));
-    for (run, stack) in stacks.iter().enumerate() {
-        let stack: Vec<Felt> = stack.iter().map(|value| Felt::new(*value).unwrap()).collect();
-        let mut host = DefaultHost::default();
-        let mut processor = FastProcessor::new(StackInputs::new(&stack).unwrap());
-        let ctx = processor.get_initial_resume_context_for_package(package.clone()).unwrap();
-        let mut observer = Observer::new();
-        run_to_end(&mut processor, &mut host, ctx, &mut observer).unwrap();
-        coverage
-            .write_output(&observer.finish(run.to_string(), RunOutcome::Ok))
-            .unwrap();
-    }
-    (source, coverage)
-}
-
 /// Records two runs of [`SRC`]: flag = 1, n = 3 doubles n and loops six
 /// times; flag = 0, n = 0 takes the else arm and skips the loop.
 fn collect(dir: &Path) -> (PathBuf, CoverageDir) {
     collect_runs(dir, "fixture", SRC, &[&[1, 3], &[0, 0]])
 }
 
-/// Prints every source node with its kind and starts, and every row with its
-/// hits and location, to explain unexpected counts.
-fn print_rows(snapshot: &Snapshot) {
-    for (commitment, package) in &snapshot.packages {
-        let debug_info = &package.debug_info;
-        let hits = &snapshot.merged[commitment];
-        for (node_id, node) in debug_info.nodes().iter().enumerate() {
-            let kind = match package.forest.get_node_by_id(node.exec_node) {
-                Some(MastNode::Block(_)) => "block",
-                Some(MastNode::Join(_)) => "join",
-                Some(MastNode::Split(_)) => "split",
-                Some(MastNode::Loop(_)) => "loop",
-                Some(MastNode::Call(_)) => "call",
-                Some(MastNode::Dyn(_)) => "dyn",
-                Some(MastNode::External(_)) => "external",
-                None => "missing",
-            };
-            let starts = hits.node_starts.get(&(node_id as u32)).copied().unwrap_or(0);
-            println!("node {node_id} {kind} starts {starts} children {:?}", node.children);
-            for row in &node.asm_ops {
-                let location =
-                    row.location_idx.into_option().and_then(|idx| debug_info.get_location(idx));
-                let op_hits = hits.op_hits.get(&(node_id as u32, row.op_idx)).copied().unwrap_or(0);
-                println!(
-                    "  op {} cycles {} hits {op_hits} `{}` in {} at {:?}",
-                    row.op_idx,
-                    row.num_cycles,
-                    debug_info[row.op_name_idx],
-                    debug_info[row.context_name_idx],
-                    location.map(|l| (l.start.0, l.end.0)),
-                );
-            }
-        }
-        for function in debug_info.functions() {
-            println!(
-                "function {} line {} root {:?}",
-                debug_info[function.name_idx],
-                function.line.0 + 1,
-                function.source_node.into_option(),
-            );
-        }
-    }
-}
-
-fn report(coverage: &CoverageDir, resolver: &mut SourceResolver, filter: &ReportFilter) -> Report {
-    let snapshot = Snapshot::load(coverage).unwrap();
-    print_rows(&snapshot);
-    build_report(&snapshot, resolver, filter)
-}
-
-/// The one file of `report`, which must be `source`.
-fn only_file<'a>(report: &'a Report, source: &Path) -> &'a FileCoverage {
-    assert!(report.unresolved.is_empty(), "{:?}", report.unresolved);
-    assert_eq!(report.files.len(), 1);
-    let file = report.files.values().next().unwrap();
-    assert_eq!(file.path, source);
-    file
-}
-
-/// The functions of `file` as `(name, line, count)`.
-fn functions(file: &FileCoverage) -> Vec<(&str, u32, u64)> {
-    file.functions
-        .iter()
-        .map(|FunctionCoverage { name, line, count }| (name.as_str(), *line, *count))
-        .collect()
-}
-
-/// Checks `functions` against `(name suffix, line, count)` in order.
-fn assert_functions(functions: &[(&str, u32, u64)], expected: &[(&str, u32, u64)]) {
-    assert_eq!(functions.len(), expected.len(), "{functions:?}");
-    for ((name, line, count), (suffix, expected_line, expected_count)) in
-        functions.iter().zip(expected)
-    {
-        assert!(name.ends_with(suffix), "{name} should end with {suffix}");
-        assert_eq!((*line, *count), (*expected_line, *expected_count), "{name}");
-    }
-}
-
-/// The branches of `file` as `(line, executed, arms)`.
-fn branches(file: &FileCoverage) -> Vec<(u32, bool, [u64; 2])> {
-    file.branches
-        .iter()
-        .map(|BranchCoverage { line, executed, arms, .. }| (*line, *executed, *arms))
-        .collect()
-}
-
 #[test]
 fn report_follows_the_coverable_rule() {
     let tmp = tempfile::tempdir().unwrap();
     let (source, coverage) = collect(tmp.path());
-    let report =
-        report(&coverage, &mut SourceResolver::new(None, vec![]), &ReportFilter::default());
-    println!("{report:#?}");
+    let report = default_report(&coverage);
     let file = only_file(&report, &source);
 
     // Line 16 (`exec.double`) has no row of its own. Lines 1, 5, and 14 (the
@@ -257,9 +144,7 @@ fn inlined_procedures_are_counted_at_every_copy() {
     let tmp = tempfile::tempdir().unwrap();
     // `begin` increments 2 to 3, so the loop runs three times.
     let (source, coverage) = collect_runs(tmp.path(), "inlined", INLINED_SRC, &[&[2]]);
-    let report =
-        report(&coverage, &mut SourceResolver::new(None, vec![]), &ReportFilter::default());
-    println!("{report:#?}");
+    let report = default_report(&coverage);
     let file = only_file(&report, &source);
 
     // `tiny` and `body` are inlined into the loop body block, and `tiny`

@@ -1,7 +1,6 @@
 //! Line, function, and branch coverage per source file.
 
 use std::{
-    cmp::Ordering,
     collections::{BTreeMap, BTreeSet},
     ops::ControlFlow,
     path::{Path, PathBuf},
@@ -15,13 +14,13 @@ use miden_mast_package::debug_info::{DebugSourceAsmOp, DebugSourceNode, DebugSou
 
 use crate::{
     ReportFilter, Snapshot,
-    source::{SourceResolver, SourceText},
+    source::{SourceResolver, SourceText, absolute_path},
 };
 
 /// Coverage of every resolved source file of a snapshot.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Report {
-    /// Files keyed by the display form of their resolved path.
+    /// Files keyed by the display form of their canonical resolved path.
     pub files: BTreeMap<String, FileCoverage>,
     /// Stored debug-info paths that no file was found for.
     pub unresolved: BTreeSet<String>,
@@ -56,7 +55,8 @@ pub struct FunctionCoverage {
 pub struct BranchCoverage {
     /// 1-based line of the instruction introducing the branch.
     pub line: u32,
-    /// Source node id of the branch, unique per branch within a package.
+    /// Byte offset of the instruction introducing the branch, which tells
+    /// apart the branches of one line.
     pub block: u32,
     /// Whether the branch was reached at all.
     pub executed: bool,
@@ -92,39 +92,45 @@ pub fn build_report(
     // callee's location. A location's count is therefore the sum over its
     // rows, across all source nodes of all packages.
     let mut locations: BTreeMap<LocationKey, u64> = BTreeMap::new();
-    // Functions with the location their count is read from. The count is
-    // known only once every package is tallied, because a body may run
-    // through another package's copy of it.
-    let mut functions: Vec<(Arc<str>, FunctionCoverage, Option<LocationKey>)> = Vec::new();
+    // How often the node holding each location was entered, summed the same
+    // way. It differs from the location's count only for a loop guard's
+    // control row, which counts every evaluation of the condition.
+    let mut entries: BTreeMap<LocationKey, u64> = BTreeMap::new();
+    // Branches by the location of the instruction introducing them. Copies
+    // of one branch, from an unrolled `repeat` or from every package a source
+    // file is linked into, add up.
+    let mut branches: BTreeMap<LocationKey, BranchTally> = BTreeMap::new();
+    // Functions by file, line, and name, each listed once per package that
+    // contains it. The count is known only once every package is tallied,
+    // because a body may run through another package's copy of it.
+    let mut functions: BTreeMap<(Arc<str>, u32, String), FunctionTally> = BTreeMap::new();
     let no_hits = PackageHits::default();
 
     for (commitment, package) in &snapshot.packages {
-        let package = PackageView {
-            package,
-            hits: snapshot.merged.get(commitment).unwrap_or(&no_hits),
-        };
+        let package =
+            PackageView::new(package, snapshot.merged.get(commitment).unwrap_or(&no_hits));
         let debug_info = &package.package.debug_info;
 
         for (node_id, node) in debug_info.nodes().iter().enumerate() {
             let node_id = node_id as u32;
-            for (row, count) in package.coverable_rows(node_id, node) {
+            for (row, count, entered) in package.coverable_rows(node_id, node) {
                 if let Some(location) = package.location(row) {
-                    *locations.entry(files.location_key(&location)).or_default() += count;
+                    let key = files.location_key(&location);
+                    *locations.entry(key.clone()).or_default() += count;
+                    *entries.entry(key).or_default() += entered;
                 }
             }
 
             // The anchor is the first located row: the split's own control
             // row (`if.true`, or `while.true` for a loop guard).
-            if let Some(arms) = package.branch_arms(node)
+            if let Some(split) = package.split(node_id, node)
                 && let Some(location) = node.asm_ops.iter().find_map(|row| package.location(row))
-                && let Some(file) = files.get(location.uri.as_str())
             {
-                file.coverage.branches.push(BranchCoverage {
-                    line: file.source.line_of(location.start.0),
-                    block: node_id,
-                    executed: package.starts(node_id) > 0,
-                    arms,
-                });
+                let branch = branches.entry(files.location_key(&location)).or_default();
+                branch.executed |= package.starts(node_id) > 0;
+                for (total, arm) in branch.arms.iter_mut().zip(split.arms) {
+                    *total += arm;
+                }
             }
         }
 
@@ -153,18 +159,12 @@ pub fn build_report(
                 ControlFlow::Break(entry) => entry,
                 ControlFlow::Continue(()) => None,
             });
-            functions.push((
-                key,
-                FunctionCoverage {
-                    name: name.as_deref().unwrap_or("").to_owned(),
-                    line: function.line.0 + 1,
-                    // Without an entry location, fall back to the root's
-                    // starts, which miss inlined copies and bodies entered
-                    // from another package.
-                    count: root.map_or(0, |root| package.starts(root)),
-                },
-                entry.map(|location| files.location_key(&location)),
-            ));
+            let name = name.as_deref().unwrap_or("").to_owned();
+            let tally = functions.entry((key, function.line.0 + 1, name)).or_default();
+            tally.root_starts += root.map_or(0, |root| package.starts(root));
+            if let Some(entry) = entry {
+                tally.entry = Some(files.location_key(&entry));
+            }
         }
     }
 
@@ -178,39 +178,31 @@ pub fn build_report(
             *hit = (*hit).max(*count);
         }
     }
-    for (key, mut function, entry) in functions {
+    for ((key, start, _), BranchTally { executed, arms }) in branches {
+        if let Some(file) = reported.get_mut(&key) {
+            file.coverage.branches.push(BranchCoverage {
+                line: file.source.line_of(start),
+                block: start,
+                executed,
+                arms,
+            });
+        }
+    }
+    for ((key, line, name), FunctionTally { entry, root_starts }) in functions {
         let Some(file) = reported.get_mut(&key) else {
             continue;
         };
-        if let Some(entry) = entry {
-            function.count = locations.get(&entry).copied().unwrap_or(0);
-        }
+        // Without an entry location, fall back to the root's starts, which
+        // miss inlined copies and bodies entered from another package.
+        let count = entry.map_or(root_starts, |entry| entries.get(&entry).copied().unwrap_or(0));
         // The definition line is coverable and hit on every entry. A
         // procedure whose body is one basic block has no row there, and LCOV
         // consumers (genhtml) reject a function line without a line record.
-        let hit = file.coverage.lines.entry(function.line).or_insert(0);
-        *hit = (*hit).max(function.count);
-        file.coverage.functions.push(function);
+        let hit = file.coverage.lines.entry(line).or_insert(0);
+        *hit = (*hit).max(count);
+        file.coverage.functions.push(FunctionCoverage { name, line, count });
     }
 
-    for file in reported.values_mut() {
-        let file = &mut file.coverage;
-        dedup(
-            &mut file.functions,
-            |a, b| (a.line, &a.name).cmp(&(b.line, &b.name)),
-            |kept, next| kept.count = kept.count.max(next.count),
-        );
-        dedup(
-            &mut file.branches,
-            |a, b| (a.line, a.block).cmp(&(b.line, b.block)),
-            |kept, next| {
-                kept.executed |= next.executed;
-                for (kept, next) in kept.arms.iter_mut().zip(next.arms) {
-                    *kept = (*kept).max(next);
-                }
-            },
-        );
-    }
     Report {
         files: reported
             .into_iter()
@@ -224,9 +216,24 @@ pub fn build_report(
 struct PackageView<'a> {
     package: &'a PackageFile,
     hits: &'a PackageHits,
+    /// The parents of every source node, once per edge.
+    parents: Vec<Vec<u32>>,
 }
 
 impl<'a> PackageView<'a> {
+    fn new(package: &'a PackageFile, hits: &'a PackageHits) -> Self {
+        let nodes = package.debug_info.nodes();
+        let mut parents = vec![Vec::new(); nodes.len()];
+        for (parent, node) in nodes.iter().enumerate() {
+            for &child in &node.children {
+                if let Some(parents) = parents.get_mut(u32::from(child) as usize) {
+                    parents.push(parent as u32);
+                }
+            }
+        }
+        Self { package, hits, parents }
+    }
+
     /// How many times source node `node` started.
     fn starts(&self, node: impl Into<u32>) -> u64 {
         self.hits.node_starts.get(&node.into()).copied().unwrap_or(0)
@@ -243,7 +250,8 @@ impl<'a> PackageView<'a> {
         row.location_idx.into_option().and_then(|idx| debug_info.get_location(idx))
     }
 
-    /// The rows of `node` that count toward coverage, each with its count.
+    /// The rows of `node` that count toward coverage, each with its count
+    /// and the number of times `node` was entered.
     ///
     /// Rows with operations count on blocks, as often as their first
     /// operation ran. Rows without operations count only on splits, as the
@@ -254,39 +262,85 @@ impl<'a> PackageView<'a> {
         &self,
         node_id: u32,
         node: &'a DebugSourceNode,
-    ) -> impl Iterator<Item = (&'a DebugSourceAsmOp, u64)> {
+    ) -> impl Iterator<Item = (&'a DebugSourceAsmOp, u64, u64)> {
         let is_block = matches!(self.exec(node), Some(MastNode::Block(_)));
-        let evaluations = self.branch_arms(node).map(|[taken, not_taken]| taken + not_taken);
+        let entered = self.starts(node_id);
+        let evaluations = self.split(node_id, node).map(|split| split.evaluations);
         let op_hits = &self.hits.op_hits;
         node.asm_ops.iter().filter_map(move |row| match (row.num_cycles, evaluations) {
             (1.., _) if is_block => {
-                Some((row, op_hits.get(&(node_id, row.op_idx)).copied().unwrap_or(0)))
+                let hits = op_hits.get(&(node_id, row.op_idx)).copied().unwrap_or(0);
+                Some((row, hits, hits))
             },
-            (0, Some(evaluations)) => Some((row, evaluations)),
+            (0, Some(evaluations)) => Some((row, evaluations, entered)),
             _ => None,
         })
     }
 
-    /// Times each arm of a split was taken, or `None` for other nodes.
+    /// The condition counts of split `node_id`, or `None` for other nodes.
     ///
     /// The assembler wraps every `while.true` in a split whose true arm is
     /// the loop and whose false arm is the block taken when the condition
     /// fails on entry. For such a guard the arms are the condition's
-    /// outcomes: it held once per iteration, and failed once per skip and
-    /// once per loop exit.
-    fn branch_arms(&self, node: &DebugSourceNode) -> Option<[u64; 2]> {
+    /// outcomes: it held once per iteration, and failed once per entry,
+    /// either skipping the loop or ending it.
+    fn split(&self, node_id: u32, node: &DebugSourceNode) -> Option<Split> {
         let (Some(MastNode::Split(_)), &[then_arm, else_arm]) =
             (self.exec(node), node.children.as_slice())
         else {
             return None;
         };
+        let entered = self.starts(node_id);
         let then_node = self.package.debug_info.source_node(then_arm)?;
-        Some(match (self.exec(then_node), then_node.children.as_slice()) {
-            (Some(MastNode::Loop(_)), &[body]) => {
-                [self.starts(body), self.starts(else_arm) + self.starts(then_arm)]
+        if let (Some(MastNode::Loop(_)), &[body]) =
+            (self.exec(then_node), then_node.children.as_slice())
+        {
+            let iterations =
+                self.starts_from(then_arm.into(), body).unwrap_or_else(|| self.starts(body));
+            return Some(Split {
+                arms: [iterations, entered],
+                evaluations: iterations + entered,
+            });
+        }
+        // One arm determines the other: every evaluation takes exactly one.
+        let arms = match (self.starts_from(node_id, then_arm), self.starts_from(node_id, else_arm))
+        {
+            (Some(taken), Some(not_taken)) => [taken, not_taken],
+            (Some(taken), None) => [taken, entered.saturating_sub(taken)],
+            (None, Some(not_taken)) => [entered.saturating_sub(not_taken), not_taken],
+            // Both arms are procedures also reached from other branches or
+            // loops; their starts are an upper bound.
+            (None, None) => {
+                [self.starts(then_arm).min(entered), self.starts(else_arm).min(entered)]
             },
-            _ => [self.starts(then_arm), self.starts(else_arm)],
-        })
+        };
+        Some(Split { arms, evaluations: entered })
+    }
+
+    /// How many times `child` started as the child of `parent`, if the hits
+    /// tell.
+    ///
+    /// A procedure has one source tree however many places call it, so the
+    /// root of a procedure called from several places has several parents
+    /// and its starts add up over them. A join or a call starts its children
+    /// once per start of its own; subtracting those leaves the starts from
+    /// `parent` when no other parent is a branch or a loop.
+    fn starts_from(&self, parent: u32, child: DebugSourceNodeId) -> Option<u64> {
+        let mut edges = 0;
+        let mut from_others = 0;
+        for &other in self.parents.get(u32::from(child) as usize)? {
+            if other == parent {
+                edges += 1;
+                continue;
+            }
+            let other_node = self.package.debug_info.source_node(other.into())?;
+            match self.exec(other_node)? {
+                MastNode::Join(_) | MastNode::Call(_) => from_others += self.starts(other),
+                _ => return None,
+            }
+        }
+        // A split whose arms are one node cannot tell them apart.
+        (edges == 1).then(|| self.starts(child).saturating_sub(from_others))
     }
 
     /// The location whose count is the number of times a function ran: the
@@ -308,8 +362,8 @@ impl<'a> PackageView<'a> {
         // the root of an inlined procedure is the block of its call site.
         let mut own_rows = self
             .coverable_rows(node_id.into(), node)
-            .filter(|(row, _)| is_own(row))
-            .filter_map(|(row, _)| self.location(row));
+            .filter(|(row, ..)| is_own(row))
+            .filter_map(|(row, ..)| self.location(row));
         match self.exec(node) {
             // Both children of a join run once per entry of the join.
             Some(MastNode::Join(_)) => {
@@ -322,8 +376,8 @@ impl<'a> PackageView<'a> {
                 Some(location) => ControlFlow::Break(Some(location)),
                 None => ControlFlow::Continue(()),
             },
-            // A split's own row counts its evaluations, but its arms run
-            // conditionally; loop bodies run once per iteration.
+            // A split is entered once per entry of the function, but its
+            // arms run conditionally; loop bodies run once per iteration.
             Some(MastNode::Split(_)) => ControlFlow::Break(own_rows.next()),
             _ => ControlFlow::Break(None),
         }
@@ -351,17 +405,19 @@ struct ReportedFile {
 
 impl Files<'_> {
     /// The key that `stored_path` is tallied under: the display form of the
-    /// resolved path, or the stored path itself when it does not resolve.
+    /// canonical resolved path, or the stored path itself when it does not
+    /// resolve.
     ///
     /// Several stored paths may resolve to one file, for example when two
-    /// packages were built on different machines; they share a key.
+    /// packages were built on different machines or from different
+    /// directories; they share a key.
     fn key(&mut self, stored_path: &str) -> Arc<str> {
         if let Some(key) = self.keys.get(stored_path) {
             return key.clone();
         }
         let key: Arc<str> = match self.resolver.resolve(stored_path) {
             Some(source) => {
-                let key: Arc<str> = source.path.display().to_string().into();
+                let key: Arc<str> = absolute_path(&source.path).display().to_string().into();
                 if self.filter.keeps(&source.path) {
                     self.reported.entry(key.clone()).or_insert_with(|| ReportedFile {
                         coverage: FileCoverage {
@@ -388,27 +444,29 @@ impl Files<'_> {
     fn location_key(&mut self, location: &Location) -> LocationKey {
         (self.key(location.uri.as_str()), location.start.0, location.end.0)
     }
-
-    /// The report entry of the file `stored_path` resolves to, if the file
-    /// is reported.
-    fn get(&mut self, stored_path: &str) -> Option<&mut ReportedFile> {
-        let key = self.key(stored_path);
-        self.reported.get_mut(&key)
-    }
 }
 
-/// Sorts `items` by `order` and merges the items it considers equal.
-///
-/// Duplicates arise when one source file is part of several packages, for
-/// example a library linked into two programs. They are merged by maximum so
-/// that LCOV consumers see each record once.
-fn dedup<T>(items: &mut Vec<T>, order: impl Fn(&T, &T) -> Ordering, merge: impl Fn(&mut T, &T)) {
-    items.sort_by(&order);
-    items.dedup_by(|next, kept| {
-        let same = order(kept, next).is_eq();
-        if same {
-            merge(kept, next);
-        }
-        same
-    });
+/// The condition counts of one split node.
+struct Split {
+    /// Times each arm was taken: `[true arm, false arm]`.
+    arms: [u64; 2],
+    /// Times the condition was evaluated.
+    evaluations: u64,
+}
+
+/// The copies of one branch seen so far.
+#[derive(Default)]
+struct BranchTally {
+    executed: bool,
+    arms: [u64; 2],
+}
+
+/// The copies of one function seen so far.
+#[derive(Default)]
+struct FunctionTally {
+    /// The location whose entries count the function's runs, if any copy
+    /// has one; it is the same for every copy.
+    entry: Option<LocationKey>,
+    /// Starts of the function's root, summed over its copies.
+    root_starts: u64,
 }

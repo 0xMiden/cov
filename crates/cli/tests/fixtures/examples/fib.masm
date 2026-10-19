@@ -1,0 +1,7 @@
+# Copied unchanged from miden-vm masm-examples/fib/fib.masm (v0.35.0-148-g85430cd21).
+begin
+    # This code computes 1001st Fibonacci number
+    repeat.1000
+        swap dup.1 add
+    end
+end

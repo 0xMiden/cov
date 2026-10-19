@@ -1,0 +1,6 @@
+use miden::core::sys
+
+begin
+    padw padw padw
+    exec.sys::truncate_stack
+end

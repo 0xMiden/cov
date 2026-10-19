@@ -1,0 +1,6 @@
+begin
+    if.true
+        push.1 drop
+    end
+    push.2 drop
+end

@@ -1,0 +1,21 @@
+proc first
+    if.true
+        push.1 drop
+    else
+        push.2 drop
+    end
+end
+
+proc second
+    if.true
+        push.1 drop
+    else
+        push.2 drop
+    end
+end
+
+begin
+    push.1 exec.first
+    push.1 exec.first
+    push.0 exec.second
+end

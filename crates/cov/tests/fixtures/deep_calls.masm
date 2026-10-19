@@ -1,0 +1,29 @@
+proc c
+    if.true
+        push.1 drop
+    else
+        push.2 drop
+    end
+end
+
+proc b
+    dup
+    if.true
+        push.3 drop
+    end
+    dup exec.c
+    exec.c
+end
+
+proc a
+    dup
+    if.true
+        push.4 drop
+    end
+    dup exec.b
+    exec.b
+end
+
+begin
+    exec.a
+end

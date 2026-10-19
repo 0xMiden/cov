@@ -1,0 +1,18 @@
+pub proc entry
+    dup neq.0
+    if.true
+        dup exec.count
+    else
+        push.1 drop
+    end
+    drop
+end
+
+proc count
+    dup neq.0
+    while.true
+        sub.1
+        dup neq.0
+    end
+    drop
+end

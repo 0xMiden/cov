@@ -1,0 +1,15 @@
+pub proc twice
+    if.true
+        push.1 drop
+    end
+    exec.inner
+    exec.inner
+end
+
+proc inner
+    dup
+    if.true
+        push.2 drop
+    end
+    drop
+end

@@ -1,0 +1,42 @@
+proc loop_in_if
+    if.true
+        dup neq.0
+        while.true
+            sub.1
+            dup neq.0
+        end
+    end
+    drop
+end
+
+proc if_in_loop
+    dup neq.0
+    while.true
+        sub.1
+        dup push.1 u32and
+        if.true
+            push.10 drop
+        else
+            push.20 drop
+        end
+        dup neq.0
+    end
+    drop
+end
+
+proc two_ifs
+    if.true
+        push.3 drop
+    end
+    if.true
+        push.4 drop
+    else
+        push.5 drop
+    end
+end
+
+begin
+    exec.loop_in_if
+    exec.if_in_loop
+    exec.two_ifs
+end

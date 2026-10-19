@@ -1,0 +1,12 @@
+begin
+    push.0
+    repeat.3
+        add.1
+    end
+    drop
+    repeat.2
+        if.true
+            push.1 drop
+        end
+    end
+end

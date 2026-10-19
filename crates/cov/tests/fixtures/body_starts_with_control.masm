@@ -1,0 +1,21 @@
+proc starts_with_if
+    if.true
+        push.1 drop
+    else
+        push.2 drop
+    end
+    push.3 drop
+end
+
+proc starts_with_while
+    while.true
+        sub.1
+        dup neq.0
+    end
+    drop
+end
+
+begin
+    exec.starts_with_if
+    exec.starts_with_while
+end

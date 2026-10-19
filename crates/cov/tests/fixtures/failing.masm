@@ -1,0 +1,13 @@
+proc check
+    if.true
+        push.1 drop
+    end
+    assert
+    push.2 drop
+end
+
+begin
+    push.3 drop
+    exec.check
+    push.4 drop
+end

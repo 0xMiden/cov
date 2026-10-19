@@ -1,0 +1,23 @@
+proc leaf_a
+    if.true
+        push.1 drop
+    end
+end
+
+proc leaf_b
+    if.true
+        push.2 drop
+    else
+        push.3 drop
+    end
+end
+
+proc only_execs
+    exec.leaf_a
+    exec.leaf_b
+end
+
+begin
+    exec.only_execs
+    exec.only_execs
+end

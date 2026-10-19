@@ -1,0 +1,640 @@
+//! One small MASM program per code shape the reporter has to handle, each
+//! checked against line, function, and branch counts computed by hand from
+//! the coverable rule and the branch semantics in `docs/architecture.md`.
+//!
+//! The fixtures live in `tests/fixtures`; line numbers in the expectations are
+//! 1-based lines of those files.
+
+mod common;
+
+use std::{collections::BTreeMap, fs, path::Path, sync::Arc};
+
+use common::{
+    assemble_program, assert_functions, branches, default_report, file, fixture, functions,
+    only_file, record_run, record_runs, report,
+};
+use miden_assembly::{
+    Assembler, DefaultSourceManager, Linkage, ModuleParser, SourceManager, ast::ModuleKind,
+};
+use miden_core_lib::CoreLibrary;
+use miden_cov::{FileCoverage, ReportFilter, SourceResolver};
+use miden_cov_collector::{RunOutcome, dir::CoverageDir};
+use miden_mast_package::{Package, QualifiedProcedureName};
+use miden_processor::{DefaultHost, HostLibrary};
+
+/// A coverage directory in a fresh temporary directory.
+fn coverage_dir() -> (tempfile::TempDir, CoverageDir) {
+    let tmp = tempfile::tempdir().unwrap();
+    let coverage = CoverageDir::new(tmp.path().join("cov"));
+    (tmp, coverage)
+}
+
+/// Parses `file` as the library module `path` with `source_manager`.
+fn library_module(
+    source_manager: &Arc<dyn SourceManager>,
+    path: &str,
+    file: &Path,
+) -> Box<miden_assembly::ast::Module> {
+    ModuleParser::new(Some(ModuleKind::Library))
+        .parse_file(Some(miden_assembly::Path::new(path)), file, source_manager.clone())
+        .unwrap()
+}
+
+/// Assembles the program at `program` with the library module at `library`,
+/// named `library_path`, statically linked.
+fn assemble_with_module(program: &Path, library_path: &str, library: &Path) -> Arc<Package> {
+    let source_manager: Arc<dyn SourceManager> = Arc::new(DefaultSourceManager::default());
+    let mut assembler = Assembler::new(source_manager.clone());
+    assembler
+        .compile_and_statically_link(library_module(&source_manager, library_path, library))
+        .unwrap();
+    Arc::from(assembler.assemble_program("program", program).unwrap())
+}
+
+/// Assembles the program at `source` with the core library linked
+/// dynamically.
+fn assemble_with_core(source: &Path) -> Arc<Package> {
+    let assembler = Assembler::default()
+        .with_package(CoreLibrary::default().package(), Linkage::Dynamic)
+        .unwrap();
+    Arc::from(assembler.assemble_program("program", source).unwrap())
+}
+
+/// A host with the core library and its debug info loaded.
+fn core_host() -> DefaultHost {
+    DefaultHost::default()
+        .with_library(HostLibrary::from(CoreLibrary::default().package()))
+        .unwrap()
+}
+
+/// The lines of `file` in `range`.
+fn lines_in(file: &FileCoverage, range: std::ops::RangeInclusive<u32>) -> BTreeMap<u32, u64> {
+    file.lines.range(range).map(|(line, count)| (*line, *count)).collect()
+}
+
+/// An `if.true` without `else`: the assembler emits an empty false arm, which
+/// is a branch arm without a line of its own.
+#[test]
+fn if_without_else() {
+    let (_tmp, coverage) = coverage_dir();
+    let source = fixture("if_without_else");
+    record_runs(&coverage, &assemble_program(&source), &[&[1], &[0]]);
+    let report = default_report(&coverage);
+    let file = only_file(&report, &source);
+
+    // Line 3 runs only when the condition holds; line 4 (`end`) and the empty
+    // arm have no row.
+    assert_eq!(file.lines, BTreeMap::from([(1, 2), (2, 2), (3, 1), (5, 2)]));
+    assert_functions(&functions(file), &[("$main", 1, 2)]);
+    assert_eq!(branches(file), [(2, true, [1, 1])]);
+}
+
+/// A loop inside an `if`, an `if` inside a loop body, and two sequential
+/// `if`s, with runs that take different paths through each.
+#[test]
+fn nested_control_flow() {
+    let (_tmp, coverage) = coverage_dir();
+    let source = fixture("nested");
+    // Inputs are `[flag, n, m, a, b]`. Run A enters the `if` and loops twice,
+    // loops three times over m = 2, 1, 0 (odd once, even twice), and takes
+    // the first `if` and the second `else`. Run B skips the `if`, skips the
+    // loop, and takes only the second `if`.
+    record_runs(&coverage, &assemble_program(&source), &[&[1, 2, 3, 1, 0], &[0, 5, 0, 0, 1]]);
+    let report = default_report(&coverage);
+    let file = only_file(&report, &source);
+
+    let expected_lines = BTreeMap::from([
+        // loop_in_if: the loop guard (4) is evaluated twice true, once false.
+        (1, 2),
+        (2, 2),
+        (3, 1),
+        (4, 3),
+        (5, 2),
+        (6, 2),
+        (9, 2),
+        // if_in_loop: the guard (14) holds three times and fails twice.
+        (12, 2),
+        (13, 2),
+        (14, 5),
+        (15, 3),
+        (16, 3),
+        (17, 3),
+        (18, 1),
+        (20, 2),
+        (22, 3),
+        (24, 2),
+        // two_ifs
+        (27, 2),
+        (28, 2),
+        (29, 1),
+        (31, 2),
+        (32, 1),
+        (34, 1),
+        // begin
+        (38, 2),
+    ]);
+    assert_eq!(file.lines, expected_lines);
+    assert_functions(
+        &functions(file),
+        &[
+            ("loop_in_if", 1, 2),
+            ("if_in_loop", 12, 2),
+            ("two_ifs", 27, 2),
+            ("$main", 38, 2),
+        ],
+    );
+    assert_eq!(
+        branches(file),
+        [
+            (2, true, [1, 1]),
+            (4, true, [2, 1]),
+            (14, true, [3, 2]),
+            (17, true, [1, 2]),
+            (28, true, [1, 1]),
+            (31, true, [1, 1]),
+        ]
+    );
+}
+
+/// `repeat.N` is unrolled by the assembler: every copy keeps the location of
+/// the instruction it repeats.
+#[test]
+fn repeat_is_unrolled() {
+    let (_tmp, coverage) = coverage_dir();
+    let source = fixture("repeat");
+    // Inputs are the conditions of the two unrolled `if` copies.
+    record_runs(&coverage, &assemble_program(&source), &[&[1, 0], &[1, 1]]);
+    let report = default_report(&coverage);
+    let file = only_file(&report, &source);
+
+    // `add.1` (4) has three rows at one location, so it counts three per run.
+    // The `if.true` (8) is evaluated twice per run, and line 9 counts the true
+    // arms of both copies.
+    assert_eq!(file.lines, BTreeMap::from([(1, 2), (2, 2), (4, 6), (6, 2), (8, 4), (9, 3)]));
+    assert_functions(&functions(file), &[("$main", 1, 2)]);
+    // The two copies of the `if` are one split node in the forest and one
+    // source node in the debug info, reached from two joins, so they form a
+    // single branch: true in three of four evaluations.
+    assert_eq!(branches(file), [(8, true, [3, 1])]);
+}
+
+/// A procedure whose body starts with an `if.true` and one whose body starts
+/// with a `while.true`: the function count stops at the leading split.
+#[test]
+fn body_starts_with_control_flow() {
+    let (_tmp, coverage) = coverage_dir();
+    let source = fixture("body_starts_with_control");
+    // Inputs are `[flag, cond, n]`. The loop runs three times in A, is
+    // skipped in B, and runs once in C: four iterations, three exits.
+    record_runs(&coverage, &assemble_program(&source), &[&[1, 1, 3], &[0, 0, 5], &[1, 1, 1]]);
+    let report = default_report(&coverage);
+    let file = only_file(&report, &source);
+
+    let expected_lines = BTreeMap::from([
+        (1, 3),
+        (2, 3),
+        (3, 2),
+        (5, 1),
+        (7, 3),
+        (10, 3),
+        // The loop guard counts evaluations: four true, three false.
+        (11, 7),
+        (12, 4),
+        (13, 4),
+        (15, 3),
+        (18, 3),
+    ]);
+    assert_eq!(file.lines, expected_lines);
+    // Each procedure ran once per run, however often its loop did.
+    assert_functions(
+        &functions(file),
+        &[("starts_with_if", 1, 3), ("starts_with_while", 10, 3), ("$main", 18, 3)],
+    );
+    assert_eq!(branches(file), [(2, true, [2, 1]), (11, true, [4, 3])]);
+}
+
+/// Branch arms and a loop body that consist of a bare `exec`: the arm is the
+/// callee's root source node, which every call site of the callee shares, so
+/// its starts are not the times the arm was taken.
+#[test]
+fn arms_that_are_procedure_calls() {
+    let (_tmp, coverage) = coverage_dir();
+    let source = fixture("shared_arms");
+    // Run 1: work(1), other(0), step(1); the first `if` calls work(1), the
+    // second takes `else`; the loop calls step(0) and step(1). Run 2:
+    // work(0), other(1), step(0); the first `if` calls other(1), the second
+    // calls work(0); the loop is skipped.
+    record_runs(
+        &coverage,
+        &assemble_program(&source),
+        &[&[1, 0, 1, 1, 1, 0, 1, 0, 1, 1, 0], &[0, 1, 0, 0, 1, 1, 0, 0]],
+    );
+    let report = default_report(&coverage);
+    let file = only_file(&report, &source);
+
+    // work runs 4 times, other 3, step 4. The loop guard (39) holds twice
+    // and fails twice.
+    let expected_lines = BTreeMap::from([
+        (1, 4),
+        (2, 4),
+        (3, 4),
+        (4, 2),
+        (6, 4),
+        (9, 3),
+        (10, 3),
+        (11, 3),
+        (12, 2),
+        (14, 3),
+        (17, 4),
+        (18, 4),
+        (19, 4),
+        (20, 2),
+        (22, 4),
+        (25, 2),
+        (29, 2),
+        (34, 2),
+        (37, 1),
+        (39, 4),
+    ]);
+    assert_eq!(file.lines, expected_lines);
+    assert_functions(
+        &functions(file),
+        &[("work", 1, 4), ("other", 9, 3), ("step", 17, 4), ("$main", 25, 2)],
+    );
+    // The roots of work, other, and step also start from the calls at lines
+    // 26 to 28, and work's from both `if`s.
+    assert_eq!(
+        branches(file),
+        [
+            (3, true, [2, 2]),
+            (11, true, [2, 1]),
+            (19, true, [2, 2]),
+            (29, true, [1, 1]),
+            (34, true, [1, 1]),
+            (39, true, [2, 2]),
+        ]
+    );
+}
+
+/// A procedure made only of `exec` calls has no row of its own; its count
+/// comes from its root node's starts.
+#[test]
+fn procedure_of_only_execs() {
+    let (_tmp, coverage) = coverage_dir();
+    let source = fixture("exec_only");
+    // Inputs are the conditions of leaf_a and leaf_b in the first and the
+    // second call of only_execs.
+    record_runs(&coverage, &assemble_program(&source), &[&[1, 0, 0, 1], &[0, 0, 0, 0]]);
+    let report = default_report(&coverage);
+    let file = only_file(&report, &source);
+
+    let expected_lines =
+        BTreeMap::from([(1, 4), (2, 4), (3, 1), (7, 4), (8, 4), (9, 1), (11, 3), (15, 4), (20, 2)]);
+    assert_eq!(file.lines, expected_lines);
+    assert_functions(
+        &functions(file),
+        &[("leaf_a", 1, 4), ("leaf_b", 7, 4), ("only_execs", 15, 4), ("$main", 20, 2)],
+    );
+    assert_eq!(branches(file), [(2, true, [1, 3]), (8, true, [1, 3])]);
+}
+
+/// Procedures calling each other three levels deep, each with an `if` so
+/// none is inlined: main calls a once, a calls b twice, b calls c twice.
+#[test]
+fn calls_three_levels_deep() {
+    let (_tmp, coverage) = coverage_dir();
+    let source = fixture("deep_calls");
+    // Every procedure takes the input flag's value: all true, then all false.
+    record_runs(&coverage, &assemble_program(&source), &[&[1], &[0]]);
+    let report = default_report(&coverage);
+    let file = only_file(&report, &source);
+
+    let expected_lines = BTreeMap::from([
+        (1, 8),
+        (2, 8),
+        (3, 4),
+        (5, 4),
+        (9, 4),
+        (10, 4),
+        (11, 4),
+        (12, 2),
+        (14, 4),
+        (18, 2),
+        (19, 2),
+        (20, 2),
+        (21, 1),
+        (23, 2),
+        (27, 2),
+    ]);
+    assert_eq!(file.lines, expected_lines);
+    assert_functions(&functions(file), &[("c", 1, 8), ("b", 9, 4), ("a", 18, 2), ("$main", 27, 2)]);
+    assert_eq!(branches(file), [(2, true, [4, 4]), (11, true, [2, 2]), (20, true, [1, 1])]);
+}
+
+/// Two procedures with identical bodies share one exec node; first is called
+/// twice with a true condition, second once with a false one.
+///
+/// Each procedure keeps a source tree of its own over the shared exec nodes,
+/// and the joins of `begin` refer to the tree of the procedure each call
+/// names, so the counts stay apart. Attribution swapped between the two
+/// procedures was reported earlier; it does not occur with assembler 0.35
+/// in this shape, with the calls reordered, without the `push` before each
+/// call, or with `call` instead of `exec`.
+#[test]
+fn deduplicated_bodies() {
+    let (_tmp, coverage) = coverage_dir();
+    let source = fixture("dedup_bodies");
+    record_runs(&coverage, &assemble_program(&source), &[&[]]);
+    let report = default_report(&coverage);
+    let file = only_file(&report, &source);
+
+    let expected_lines = BTreeMap::from([
+        (1, 2),
+        (2, 2),
+        (3, 2),
+        (5, 0),
+        (9, 1),
+        (10, 1),
+        (11, 0),
+        (13, 1),
+        (17, 1),
+        (18, 1),
+        (19, 1),
+        (20, 1),
+    ]);
+    assert_eq!(file.lines, expected_lines);
+    assert_functions(&functions(file), &[("first", 1, 2), ("second", 9, 1), ("$main", 17, 1)]);
+    assert_eq!(branches(file), [(2, true, [2, 0]), (10, true, [0, 1])]);
+}
+
+/// A basic block longer than one operation batch, and a single line holding
+/// many instructions.
+#[test]
+fn long_basic_block() {
+    let (_tmp, coverage) = coverage_dir();
+    let source = fixture("long_block");
+    record_runs(&coverage, &assemble_program(&source), &[&[]]);
+    let report = default_report(&coverage);
+    let file = only_file(&report, &source);
+
+    // `begin`, `push.0`, 100 lines of `add.1`, `drop`, and one line with
+    // `push.0`, 80 `add.1`, and `drop`: every line once.
+    assert_eq!(file.lines, (1..=104).map(|line| (line, 1)).collect());
+    assert_functions(&functions(file), &[("$main", 1, 1)]);
+    assert!(file.branches.is_empty());
+}
+
+/// A program calling into a library module from another file: both files
+/// are reported with their own counts.
+#[test]
+fn procedures_across_modules() {
+    let (_tmp, coverage) = coverage_dir();
+    let program = fixture("multi_module");
+    let library = fixture("multi_module_lib");
+    let package = assemble_with_module(&program, "fixtures::helpers", &library);
+    // Inputs are `[g, f, x, y]`: run A calls twice(1, 0, 1) from local, run B
+    // drops them. Both then call twice(1, 1, 0) from begin.
+    record_runs(&coverage, &package, &[&[1, 1, 0, 1], &[0, 0, 0, 0]]);
+    let report = default_report(&coverage);
+    assert!(report.unresolved.is_empty(), "{:?}", report.unresolved);
+    assert_eq!(report.files.len(), 2);
+
+    let lib = file(&report, &library);
+    assert_eq!(
+        lib.lines,
+        BTreeMap::from([(1, 3), (2, 3), (3, 3), (9, 6), (10, 6), (11, 6), (12, 3), (14, 6)])
+    );
+    assert_functions(&functions(lib), &[("twice", 1, 3), ("inner", 9, 6)]);
+    assert_eq!(branches(lib), [(2, true, [3, 0]), (11, true, [3, 3])]);
+
+    let main = file(&report, &program);
+    assert_eq!(main.lines, BTreeMap::from([(3, 2), (4, 2), (7, 1), (11, 2), (13, 2)]));
+    assert_functions(&functions(main), &[("local", 3, 2), ("$main", 11, 2)]);
+    assert_eq!(branches(main), [(4, true, [1, 1])]);
+}
+
+/// The expected coverage of `library_entry.masm` after runs with `[2]` and
+/// `[0]`, whether it ran as a library through an entrypoint or from a
+/// program.
+fn assert_library_entry(file: &FileCoverage) {
+    let expected_lines = BTreeMap::from([
+        (1, 2),
+        (2, 2),
+        (3, 2),
+        (4, 1),
+        (6, 1),
+        (8, 2),
+        (11, 1),
+        (12, 1),
+        (13, 3),
+        (14, 2),
+        (15, 2),
+        (17, 1),
+    ]);
+    assert_eq!(file.lines, expected_lines);
+    assert_functions(&functions(file), &[("entry", 1, 2), ("count", 11, 1)]);
+    assert_eq!(branches(file), [(3, true, [1, 1]), (13, true, [2, 1])]);
+}
+
+/// A library package made executable through an entrypoint counts the same
+/// as the program that calls the entrypoint.
+#[test]
+fn library_through_entrypoint() {
+    let library = fixture("library_entry");
+    let stacks: &[&[u64]] = &[&[2], &[0]];
+
+    let (_tmp, coverage) = coverage_dir();
+    let source_manager: Arc<dyn SourceManager> = Arc::new(DefaultSourceManager::default());
+    let package = Assembler::new(source_manager.clone())
+        .assemble_library(
+            "entry_lib",
+            library_module(&source_manager, "fixtures::entry_lib", &library),
+            Vec::<Box<miden_assembly::ast::Module>>::new(),
+        )
+        .unwrap();
+    let entrypoint: QualifiedProcedureName = "fixtures::entry_lib::entry".parse().unwrap();
+    let package = Arc::new(package.make_executable(&entrypoint).unwrap());
+    record_runs(&coverage, &package, stacks);
+    assert_library_entry(only_file(&default_report(&coverage), &library));
+
+    let (_tmp, coverage) = coverage_dir();
+    let program = fixture("library_entry_program");
+    let package = assemble_with_module(&program, "fixtures::entry_lib", &library);
+    record_runs(&coverage, &package, stacks);
+    let report = default_report(&coverage);
+    assert_eq!(report.files.len(), 2);
+    assert_library_entry(file(&report, &library));
+    let main = file(&report, &program);
+    assert_eq!(main.lines, BTreeMap::from([(3, 2)]));
+    assert_functions(&functions(main), &[("$main", 3, 2)]);
+}
+
+/// The core library's `sys/mod.masm` among the files of a report.
+fn core_sys(report: &miden_cov::Report) -> &FileCoverage {
+    report
+        .files
+        .values()
+        .find(|file| file.path.ends_with("asm/sys/mod.masm"))
+        .unwrap_or_else(|| panic!("no core sys module in {:?}", report.files.keys()))
+}
+
+/// Keeps the program fixture `name` and the core library's `sys/mod.masm`.
+fn program_and_core_sys(name: &str) -> ReportFilter {
+    ReportFilter::new(&[format!("**/fixtures/{name}.masm"), "**/asm/sys/mod.masm".into()], &[])
+        .unwrap()
+}
+
+/// A program calling a procedure of the dynamically linked core library:
+/// the observer follows the switch to the library's forest, and the library
+/// file is reported with its own counts.
+#[test]
+fn call_into_core_library() {
+    let (_tmp, coverage) = coverage_dir();
+    let source = fixture("core_call");
+    let package = assemble_with_core(&source);
+    record_run(&coverage, &package, core_host(), "core", &[]).unwrap();
+    let report = report(
+        &coverage,
+        &mut SourceResolver::new(None, vec![]),
+        &program_and_core_sys("core_call"),
+    );
+    assert_eq!(report.files.len(), 2, "{:?}", report.files.keys());
+
+    let main = file(&report, &source);
+    assert_eq!(main.lines, BTreeMap::from([(3, 1), (4, 1)]));
+    assert_functions(&functions(main), &[("$main", 3, 1)]);
+
+    // Twelve elements above the sixteen: the first word is dropped before
+    // the loop, which then drops the other two, one per iteration.
+    // The debug info puts the definition on its first attribute,
+    // `@locals(4)` on line 28, not on `pub proc` (29). Entered through the
+    // program's external node, the procedure's root source node records no
+    // start (its children do), so the count comes from the first row of the
+    // body.
+    let sys = core_sys(&report);
+    let truncate = functions(sys).into_iter().find(|f| f.0.ends_with("truncate_stack")).unwrap();
+    assert_eq!((truncate.1, truncate.2), (28, 1));
+    assert_eq!(
+        lines_in(sys, 28..=47),
+        BTreeMap::from([(28, 1), (31, 1), (35, 1), (36, 3), (37, 2), (40, 2), (45, 1)])
+    );
+    assert!(branches(sys).contains(&(36, true, [2, 1])), "{:?}", branches(sys));
+}
+
+/// The nprime example from the VM repository, run for the first 50 primes
+/// and for the first 2, merged.
+#[test]
+fn nprime() {
+    let (_tmp, coverage) = coverage_dir();
+    let source = fixture("nprime");
+    let package = assemble_with_core(&source);
+    for (run, stack) in [[50], [2]].iter().enumerate() {
+        record_run(&coverage, &package, core_host(), &run.to_string(), stack).unwrap();
+    }
+    let report = report(
+        &coverage,
+        &mut SourceResolver::new(None, vec![]),
+        &program_and_core_sys("nprime"),
+    );
+    assert_eq!(report.files.len(), 2, "{:?}", report.files.keys());
+
+    let main = file(&report, &source);
+    let counts: Vec<(&str, u64)> =
+        functions(main).into_iter().map(|(name, _, count)| (name, count)).collect();
+    let expected = [
+        ("append", 52),
+        ("should_continue", 50),
+        ("is_not_prime_should_continue", 429),
+        ("is_not_prime", 113),
+        ("next", 48),
+        ("$main", 2),
+    ];
+    assert_eq!(counts.len(), expected.len(), "{counts:?}");
+    for ((name, count), (suffix, expected)) in counts.iter().zip(expected) {
+        assert!(name.ends_with(&format!("::{suffix}")), "{name} should end with {suffix}");
+        assert_eq!(*count, expected, "{name}");
+    }
+    let arms: Vec<(u32, [u64; 2])> =
+        branches(main).into_iter().map(|(line, _, arms)| (line, arms)).collect();
+    assert_eq!(
+        arms,
+        [
+            (67, [48, 381]),
+            (75, [381, 48]),
+            (84, [65, 316]),
+            (107, [316, 113]),
+            (133, [65, 48]),
+            (172, [48, 2]),
+        ]
+    );
+
+    let sys = core_sys(&report);
+    let truncate = functions(sys).into_iter().find(|f| f.0.ends_with("truncate_stack")).unwrap();
+    assert_eq!(truncate.2, 2);
+    assert!(branches(sys).contains(&(36, true, [12, 2])), "{:?}", branches(sys));
+}
+
+/// A run that fails part way is still written; what ran before the failure
+/// is counted and what comes after is not.
+#[test]
+fn failing_run() {
+    let (_tmp, coverage) = coverage_dir();
+    let source = fixture("failing");
+    // check takes the `if`, then asserts on 0.
+    let result =
+        record_run(&coverage, &assemble_program(&source), DefaultHost::default(), "fail", &[1, 0]);
+    assert!(result.is_err());
+    let runs = coverage.read_runs().unwrap();
+    assert_eq!(runs.len(), 1);
+    assert!(matches!(runs[0].outcome, RunOutcome::Failed(_)), "{:?}", runs[0].outcome);
+
+    let report = default_report(&coverage);
+    let file = only_file(&report, &source);
+    // The failing `assert` (5) started, so it is hit; the rest of check (6)
+    // and of begin (12) never ran.
+    assert_eq!(
+        file.lines,
+        BTreeMap::from([(1, 1), (2, 1), (3, 1), (5, 1), (6, 0), (9, 1), (10, 1), (12, 0)])
+    );
+    assert_functions(&functions(file), &[("check", 1, 1), ("$main", 9, 1)]);
+    assert_eq!(branches(file), [(2, true, [1, 0])]);
+}
+
+/// One source file stored under different paths by two packages is reported
+/// once, with the counts of both.
+#[test]
+fn one_file_under_two_paths() {
+    let (_tmp, coverage) = coverage_dir();
+    let library = fixture("multi_module_lib");
+    // The library linked into two programs, once through its absolute path
+    // and once through a path relative to the crate, the test's current
+    // directory.
+    let absolute = assemble_with_module(&fixture("multi_module"), "fixtures::helpers", &library);
+    let relative = assemble_with_module(
+        &fixture("two_paths"),
+        "fixtures::helpers",
+        Path::new("tests/../tests/fixtures/multi_module_lib.masm"),
+    );
+    // multi_module drops its inputs and calls twice(1, 1, 0); two_paths calls
+    // twice(1, 0, 0).
+    record_runs(&coverage, &absolute, &[&[0, 0, 0, 0]]);
+    record_runs(&coverage, &relative, &[&[]]);
+    let report = default_report(&coverage);
+    assert!(report.unresolved.is_empty(), "{:?}", report.unresolved);
+    assert_eq!(report.files.len(), 3, "{:?}", report.files.keys());
+    let copies: Vec<&FileCoverage> = report
+        .files
+        .values()
+        .filter(|file| fs::canonicalize(&file.path).unwrap() == library)
+        .collect();
+    let [lib] = copies.as_slice() else {
+        panic!("{} is reported {} times", library.display(), copies.len());
+    };
+
+    assert_eq!(
+        lib.lines,
+        BTreeMap::from([(1, 2), (2, 2), (3, 2), (9, 4), (10, 4), (11, 4), (12, 1), (14, 4)])
+    );
+    assert_functions(&functions(lib), &[("twice", 1, 2), ("inner", 9, 4)]);
+    assert_eq!(branches(lib), [(2, true, [2, 0]), (11, true, [1, 3])]);
+}
