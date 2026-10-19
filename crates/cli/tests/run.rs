@@ -119,3 +119,81 @@ fn package_without_debug_info_is_rejected() {
     assert!(stderr.contains("miden-project.toml"), "{stderr}");
     assert!(!cov.exists());
 }
+
+#[test]
+fn report_merges_runs_into_lcov_and_summary() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (_, masp) = assemble_fixture(tmp.path());
+    let cov = tmp.path().join("cov");
+    for (name, stack) in [("taken", [1, 3]), ("skipped", [0, 0])] {
+        let inputs = write_inputs(tmp.path(), &format!("{name}.toml"), stack);
+        let output = miden_cov_run(&masp, &cov)
+            .arg("--inputs")
+            .arg(&inputs)
+            .args(["--name", name])
+            .output()
+            .unwrap();
+        assert_wrote(&output);
+    }
+
+    let lcov = tmp.path().join("out/lcov.info");
+    let output = Command::new(env!("CARGO_BIN_EXE_miden-cov"))
+        .arg("report")
+        .arg("--cov-dir")
+        .arg(&cov)
+        .arg("--lcov")
+        .arg(&lcov)
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(output.status.success(), "stdout: {stdout}\nstderr: {stderr}");
+    eprintln!("{stdout}");
+    assert!(stdout.contains("fixture.masm"), "{stdout}");
+    assert!(stdout.contains("TOTAL"), "{stdout}");
+    assert!(stdout.contains(&format!("wrote {}", lcov.display())), "{stdout}");
+
+    let trace = fs::read_to_string(&lcov).unwrap();
+    // Both arms of the if and both ways through the loop guard were taken.
+    assert!(trace.contains("BRDA:15,"), "{trace}");
+    assert!(trace.contains("BRDA:7,"), "{trace}");
+    assert!(!trace.contains(",-\n"), "{trace}");
+    // The loop body ran six times: n = 3 doubled.
+    assert!(trace.contains("DA:8,6\n"), "{trace}");
+    // The else arm ran once, in the skipped run.
+    assert!(trace.contains("DA:18,1\n"), "{trace}");
+    assert!(trace.contains("FNDA:1,::$exec::double\n"), "{trace}");
+    assert!(trace.contains("FNDA:2,::$exec::count_down\n"), "{trace}");
+    assert!(trace.ends_with("end_of_record\n"), "{trace}");
+
+    // genhtml must accept the trace without complaint.
+    let html = tmp.path().join("html");
+    match Command::new("genhtml")
+        .arg("--branch-coverage")
+        .arg("--output-directory")
+        .arg(&html)
+        .arg(&lcov)
+        .output()
+    {
+        Ok(output) => {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            assert!(output.status.success(), "{stderr}");
+            assert!(!stderr.contains("WARNING"), "{stderr}");
+            assert!(html.join("index.html").exists());
+        },
+        Err(e) => eprintln!("genhtml not available, skipping HTML check: {e}"),
+    }
+
+    // dump prints the run as JSON.
+    let run_file = fs::read_dir(cov.join("runs")).unwrap().next().unwrap().unwrap().path();
+    let output = Command::new(env!("CARGO_BIN_EXE_miden-cov"))
+        .arg("dump")
+        .arg(&run_file)
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let json: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(json["outcome"], "ok");
+    assert!(json["cycles"].as_u64().unwrap() > 0);
+    assert_eq!(json["packages"].as_array().unwrap().len(), 1);
+}
