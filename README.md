@@ -3,6 +3,8 @@
 Code coverage for Miden VM programs: Miden Assembly (MASM) and Rust compiled with the
 Miden compiler.
 
+![Coverage of a MASM program, rendered by genhtml from the LCOV output](docs/images/fixture-report.png)
+
 Coverage is collected by observing VM execution and is mapped back to source files through
 the debug info carried in Miden packages. Reports are produced in the LCOV format, so they
 work with the usual coverage tooling (`genhtml`, IDE gutters, CI coverage services).
