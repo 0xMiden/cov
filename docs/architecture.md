@@ -18,9 +18,9 @@ next.
    package whose debug-info section holds one row per source instruction and
    a tree of source nodes mirroring the MAST. This is the only input; the
    program is never modified and there is no coverage build.
-2. **Collection.** The collector observes the VM cycle by cycle while the
-   package executes and counts which source nodes started and which
-   operations ran.
+2. **Collection.** The debugger engine steps the VM and resolves every
+   cycle to source; the collector counts, from those records, which source
+   nodes started, from which parent, and which operations ran.
 3. **The coverage directory.** Each VM run ends as one run file holding its
    counts, and each package appears once with its forest and debug info.
    The directory is the only link between collecting and reporting.
@@ -34,20 +34,21 @@ processes or machines merge by landing in the same directory.
 
 ## Crates
 
-- **collector**: observes a VM execution and writes a run file. It also
-  provides the program-executor implementation that test suites plug into the
-  protocol's transaction executor. It depends on the VM crates only. It must
-  never depend on the debugger engine, because the protocol moves to a new VM
-  release before the debugger does and this crate has to be releasable the same
-  day the VM is.
+- **collector**: counts the per-cycle records the debugger engine produces
+  and writes a run file. It also provides the program-executor implementation
+  that test suites plug into the protocol's transaction executor; that
+  executor drives the engine's host-agnostic stepper with the host the test
+  suite supplies. The engine is the only reader of the VM's continuation
+  stream: the collector never interprets continuations itself.
 - **cov**: reads a coverage directory, merges runs, resolves source files,
   computes line, function, and branch coverage, and writes the output formats.
   It never executes anything.
 - **cli**: the `miden-cov` binary. `run` loads and links a package through the
-  debugger engine, drives it under the collector, and writes a run file.
-  `report` and `dump` are thin fronts over the cov crate. The debugger engine
-  is used here for what it is good at: library lookup, package loading, and the
-  inputs file format users already know from the debugger.
+  debugger engine, steps its debug executor with the collector attached, and
+  writes a run file. `report` and `dump` are thin fronts over the cov crate.
+  The debugger engine is used here for what it is good at: library lookup,
+  package loading, event handlers, and the inputs file format users already
+  know from the debugger.
 
 ## Glossary
 
@@ -165,19 +166,22 @@ aborts the report.
 ## Test-suite activation
 
 A test suite opts in by enabling the collector as a dependency and pointing
-the protocol's transaction executor at the collector's program executor. The
-collector is active only when the coverage directory environment variable is
-set, so an enabled feature with no environment variable costs nothing. Each VM
-run, which under the usual test runner means each test, writes its own run
-file; no global state is shared between tests.
+the protocol's transaction executor at the collector's program executor, which
+runs the program through the engine's stepper with the suite's own host. The
+collector writes only when the coverage directory environment variable is
+set, so an enabled feature with no environment variable changes nothing but
+the stepping cost. Each VM run, which under the usual test runner means each
+test, writes its own run file named after the test; no global state is shared
+between tests. Coverage never changes a test's outcome: a run file that cannot
+be written is reported and the execution's outputs are returned as usual.
 
 ## Version policy
 
 All Miden dependencies come from published releases, never git pins. The
-workspace tracks one VM release: the one the debugger engine pins, since the
-CLI cannot move ahead of it. If the protocol moves to a VM release the debugger
-does not yet support, the collector crate alone may pin ahead, because test
-suites need the collector and not the CLI.
+workspace tracks one VM release: the one the debugger engine pins, since every
+crate here builds on the engine. If the protocol moves to a VM release the
+debugger does not yet support, coverage of the protocol's tests waits for the
+debugger to follow.
 
 ## Report scope
 

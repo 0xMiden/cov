@@ -1,6 +1,6 @@
 # 0005: Published releases only; the workspace follows the debugger's VM pin
 
-Status: accepted (2026-10-19)
+Status: accepted (2026-10-19); the clause letting the collector pin ahead is superseded by [0018](0018-collect-through-the-debugger-engine.md)
 
 ## Context
 
