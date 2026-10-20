@@ -96,20 +96,13 @@ pub fn run(args: RunArgs) -> anyhow::Result<()> {
     .map_err(from_report)
     .context("failed to load link libraries")?;
     let source_manager: Arc<dyn SourceManager> = Arc::new(DefaultSourceManager::default());
-    let mut exec = Executor::from_config(args.inputs.unwrap_or_default())
+    let (mut stepper, mut host) = Executor::from_config(args.inputs.unwrap_or_default())
         .with_registry(registry)
-        .into_debug(package, source_manager);
+        .into_stepper(package, source_manager);
 
     // The engine describes each cycle to the collector before executing it.
     let mut collector = Collector::new();
-    let result = loop {
-        if let Err(error) = exec.step_with(|cycle| collector.on_cycle(cycle)) {
-            break Err(error);
-        }
-        if exec.stopped {
-            break Ok(());
-        }
-    };
+    let result = stepper.run_sync(&mut host, |cycle| collector.on_cycle(cycle));
     let outcome = match &result {
         Ok(()) => RunOutcome::Ok,
         Err(error) => RunOutcome::Failed(error.to_string()),

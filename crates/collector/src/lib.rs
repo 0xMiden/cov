@@ -9,10 +9,10 @@
 //!
 //! The debugger engine resolves every VM cycle to source and hands the
 //! collector one record per cycle. Any loop that steps the engine can feed a
-//! [`Collector`]: the `miden-cov run` command drives the engine's debug
-//! executor, and [`CoverageExecutor`] drives the engine's stepper from inside
-//! an executor generic over the VM's program executor, such as the
-//! protocol's transaction executor.
+//! [`Collector`]: the `miden-cov run` command drives the engine's stepper
+//! with the host the engine builds, and [`CoverageExecutor`] drives it from
+//! inside an executor generic over the VM's program executor, such as the
+//! protocol's transaction executor, with that executor's host.
 
 #![no_std]
 

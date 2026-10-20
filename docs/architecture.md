@@ -44,8 +44,8 @@ processes or machines merge by landing in the same directory.
   computes line, function, and branch coverage, and writes the output formats.
   It never executes anything.
 - **cli**: the `miden-cov` binary. `run` loads and links a package through the
-  debugger engine, steps its debug executor with the collector attached, and
-  writes a run file. `report` and `dump` are thin fronts over the cov crate.
+  debugger engine, drives the engine's stepper with the collector attached,
+  and writes a run file. `report` and `dump` are thin fronts over the cov crate.
   The debugger engine is used here for what it is good at: library lookup,
   package loading, event handlers, and the inputs file format users already
   know from the debugger.

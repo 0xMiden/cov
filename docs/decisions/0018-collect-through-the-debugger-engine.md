@@ -33,11 +33,11 @@ the processor with any synchronous or asynchronous host and hands each record
 to a callback. The engine's debug executor goes through the same resolution.
 
 The collector depends on the engine. It keeps the per-package hit tables, the
-run file, and the coverage directory, and feeds them from the records. The
-`run` command drives the engine's debug executor, which keeps the debugger's
-event handlers and inputs. A program executor over the stepper lets test
-suites plug coverage into executors generic over the VM's program-executor
-trait, with their own host.
+run file, and the coverage directory, and feeds them from the records. Both
+entry points drive the stepper: the `run` command with the host the engine
+builds from its registry, inputs file, and event handlers; the program
+executor, which lets test suites plug coverage into executors generic over
+the VM's program-executor trait, with the host the suite supplies.
 
 ## Alternatives
 
@@ -61,11 +61,11 @@ trait, with their own host.
   and the differential test pass unchanged; the differential test is now the
   contract test of the engine's hook against the engine's own row
   attribution.
-- Batch collection through the debug executor pays the debugger's per-cycle
-  bookkeeping, about twice the cost of the stepper. The `run` command accepts
-  that for now; the stepper is the path for test suites. A switch that skips
-  the bookkeeping is a follow-up if a measurement on a real transaction
-  demands it.
+- Collection never goes through the debug executor, whose per-cycle
+  bookkeeping costs about twice the stepper; the debug executor goes through
+  the same resolution and stays the debugger's own. Rust coverage needs more
+  static debug info per record, not runtime state, so adding to the record
+  serves both.
 - Gaps found in the VM's step API, to be raised upstream: no public way to
   rebuild the execution output from a stepped processor (the stepper clones
   the deferred state to export the witness); no way to start a stepped
