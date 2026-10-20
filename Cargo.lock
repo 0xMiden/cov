@@ -1909,6 +1909,7 @@ dependencies = [
  "miden-core",
  "miden-core-lib",
  "miden-cov-collector",
+ "miden-debug-engine",
  "miden-debug-types",
  "miden-mast-package",
  "miden-processor",
@@ -1939,6 +1940,7 @@ version = "0.1.0"
 dependencies = [
  "miden-assembly",
  "miden-core",
+ "miden-debug-engine",
  "miden-mast-package",
  "miden-processor",
  "tempfile",
@@ -1998,8 +2000,7 @@ dependencies = [
 [[package]]
 name = "miden-debug-engine"
 version = "0.18.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "faa3e0d718eff277b906b7791e048a3f1368d47bba02a40153ec15c9a5faa066"
+source = "git+https://github.com/0xMiden/miden-debug?branch=cov-use-debug#672629a4de97de73e33d0caa9cdbd2059198d7e0"
 dependencies = [
  "clap",
  "hashbrown 0.17.1",

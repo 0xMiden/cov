@@ -1,14 +1,17 @@
-//! Differential test of source attribution: the collector against the
-//! debugger engine.
+//! Differential test of source attribution: the collector's counts against
+//! the debugger engine's row attribution.
 //!
-//! The collector attributes each VM cycle to a debug-info row through its own
-//! reading of the processor's continuation stream (padded operation index,
-//! source node ids, forest switches). The debugger engine's `DebugExecutor`
-//! contains an independent implementation of the same attribution: after each
-//! `step()` it exposes the operation just executed (`current_op`) and the row
-//! it attributes it to (`current_asmop`). Every program here runs through
-//! both with the same package and inputs, and the attributions must agree, so
-//! a disagreement shows up without hand-written expectations.
+//! The collector has no reading of the continuation stream of its own: it
+//! counts the per-cycle records the engine hands out (source node, padded
+//! operation index, node starts). The engine's `DebugExecutor` separately
+//! exposes, after each `step()`, the operation just executed (`current_op`)
+//! and the row it attributes it to (`current_asmop`), computed from the padded
+//! operation index through the asm-op lookup. Every program here runs through
+//! the collector driven by the engine's `Stepper` and through the
+//! `DebugExecutor` with the same package and inputs, and the attributions must
+//! agree. This is the contract test of the engine's per-cycle hook and of
+//! `Stepper` against `DebugExecutor`, and a disagreement shows up without
+//! hand-written expectations.
 //!
 //! # The engine side
 //!
@@ -59,9 +62,9 @@ use std::{
 use miden_assembly::{Assembler, Linkage};
 use miden_core_lib::CoreLibrary;
 use miden_cov::Snapshot;
-use miden_cov_collector::{Observer, RunOutcome, dir::CoverageDir, run_to_end};
+use miden_cov_collector::{Collector, RunOutcome, dir::CoverageDir};
 use miden_debug_engine::{
-    ExecutionConfig, Executor,
+    ExecutionConfig, Executor, Stepper,
     debug_types::{DefaultSourceManager, Location},
     processor::{
         DefaultHost, ExecutionOptions, FastProcessor, Felt, HostLibrary, StackInputs,
@@ -205,17 +208,18 @@ fn engine_attribution(program: &Program, package: &Arc<Package>) -> Attribution 
 fn collect(program: &Program, package: &Arc<Package>, cov: &Path) {
     let mut host = DefaultHost::default();
     host.load_library(HostLibrary::from(CoreLibrary::default().package())).unwrap();
-    let mut processor = FastProcessor::new_with_options(
+    let processor = FastProcessor::new_with_options(
         program.stack_inputs(),
         program.advice_inputs(),
         ExecutionOptions::default(),
     )
     .unwrap();
-    let ctx = processor.get_initial_resume_context_for_package(package.clone()).unwrap();
-    let mut observer = Observer::new();
-    run_to_end(&mut processor, &mut host, ctx, &mut observer)
+    let mut stepper = Stepper::for_package(processor, package.clone()).unwrap();
+    let mut collector = Collector::new();
+    stepper
+        .run_sync(&mut host, |cycle| collector.on_cycle(cycle))
         .unwrap_or_else(|e| panic!("{}: collector execution failed: {e}", program.name));
-    let output = observer.finish(program.name.into(), RunOutcome::Ok);
+    let output = collector.finish(program.name.into(), RunOutcome::Ok);
     CoverageDir::new(cov).write_output(&output).unwrap();
 }
 

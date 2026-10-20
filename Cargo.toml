@@ -45,6 +45,11 @@ miden-processor = { version = "0.35.0", default-features = false }
 miden-cov = { version = "0.1.0", path = "crates/cov" }
 miden-cov-collector = { version = "0.1.0", path = "crates/collector", default-features = false }
 
+# The collector consumes an unreleased debugger engine (issue #6). Nothing merges
+# until that engine release exists and this patch goes away.
+[patch.crates-io]
+miden-debug-engine = { git = "https://github.com/0xMiden/miden-debug", branch = "cov-use-debug" }
+
 [profile.dev]
 lto = false
 codegen-units = 1

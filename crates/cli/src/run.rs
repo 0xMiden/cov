@@ -13,7 +13,7 @@ use std::{
 
 use anyhow::{Context, anyhow, bail};
 use clap::Args;
-use miden_cov_collector::{Observer, RunOutcome, dir::CoverageDir, run_to_end};
+use miden_cov_collector::{Collector, RunOutcome, dir::CoverageDir};
 use miden_debug_engine::{
     ExecutionConfig, Executor, HybridPackageRegistry, LinkLibrary,
     debug_types::{DefaultSourceManager, SourceManager, Uri},
@@ -99,17 +99,24 @@ pub fn run(args: RunArgs) -> anyhow::Result<()> {
     let mut exec = Executor::from_config(args.inputs.unwrap_or_default())
         .with_registry(registry)
         .into_debug(package, source_manager);
-    let ctx = exec.resume_ctx.take().expect("a fresh debug executor has a resume context");
 
-    let mut observer = Observer::new();
-    let result = run_to_end(&mut exec.processor, &mut exec.host, ctx, &mut observer);
+    // The engine describes each cycle to the collector before executing it.
+    let mut collector = Collector::new();
+    let result = loop {
+        if let Err(error) = exec.step_with(|cycle| collector.on_cycle(cycle)) {
+            break Err(error);
+        }
+        if exec.stopped {
+            break Ok(());
+        }
+    };
     let outcome = match &result {
         Ok(()) => RunOutcome::Ok,
         Err(error) => RunOutcome::Failed(error.to_string()),
     };
 
     let name = args.name.unwrap_or_else(|| default_run_name(&args.package));
-    let output = observer.finish(name, outcome);
+    let output = collector.finish(name, outcome);
     let cov_dir = args.cov_dir.map_or_else(CoverageDir::from_env_or_default, CoverageDir::new);
     let path = cov_dir
         .write_output(&output)

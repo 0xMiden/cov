@@ -485,7 +485,7 @@ fn program_and_core_sys(name: &str) -> ReportFilter {
 }
 
 /// A program calling a procedure of the dynamically linked core library:
-/// the observer follows the switch to the library's forest, and the library
+/// the collector follows the switch to the library's forest, and the library
 /// file is reported with its own counts.
 #[test]
 fn call_into_core_library() {

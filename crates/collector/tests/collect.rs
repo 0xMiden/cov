@@ -1,13 +1,24 @@
-//! Observes a small MASM program and checks the raw hits and the coverage
-//! directory round trip.
+//! Collects a small MASM program through the engine's stepper and checks the
+//! raw hits, the coverage directory round trip, and the program executor.
 
-use std::sync::Arc;
+use std::{
+    pin::pin,
+    sync::Arc,
+    task::{Context, Poll, Waker},
+};
 
 use miden_assembly::Assembler;
 use miden_core::{Felt, mast::MastNode};
-use miden_cov_collector::{Observer, PackageHits, RunOutcome, dir::CoverageDir, run_to_end};
+use miden_cov_collector::{
+    Collector, CoverageExecutor, PackageHits, RunOutcome,
+    dir::{COVERAGE_DIR_ENV, CoverageDir},
+};
+use miden_debug_engine::Stepper;
 use miden_mast_package::Package;
-use miden_processor::{DefaultHost, FastProcessor, StackInputs};
+use miden_processor::{
+    DefaultHost, ExecutionError, ExecutionOptions, ExecutionOutput, FastProcessor, ProgramExecutor,
+    StackInputs, advice::AdviceInputs,
+};
 
 /// Two procedures, an if/else, and a loop guarded by the split the assembler
 /// wraps around every `while.true`.
@@ -43,13 +54,13 @@ fn fixture() -> Arc<Package> {
 /// its only package.
 fn run(package: &Arc<Package>, flag: u64, n: u64) -> (PackageHits, u64) {
     let mut host = DefaultHost::default();
-    let mut processor = FastProcessor::new(
+    let processor = FastProcessor::new(
         StackInputs::new(&[Felt::new(flag).unwrap(), Felt::new(n).unwrap()]).unwrap(),
     );
-    let ctx = processor.get_initial_resume_context_for_package(package.clone()).unwrap();
-    let mut observer = Observer::new();
-    run_to_end(&mut processor, &mut host, ctx, &mut observer).unwrap();
-    let output = observer.finish("test".into(), RunOutcome::Ok);
+    let mut stepper = Stepper::for_package(processor, package.clone()).unwrap();
+    let mut collector = Collector::new();
+    stepper.run_sync(&mut host, |cycle| collector.on_cycle(cycle)).unwrap();
+    let output = collector.finish("test".into(), RunOutcome::Ok);
     assert_eq!(output.packages.len(), 1);
     assert_eq!(output.packages[0].commitment, package.mast_forest_commitment());
     let (commitment, hits) = output.run.packages.into_iter().next().unwrap();
@@ -132,13 +143,13 @@ fn coverage_dir_round_trip() {
     let dir = CoverageDir::new(tmp.path().join("cov"));
 
     let mut host = DefaultHost::default();
-    let mut processor = FastProcessor::new(
+    let processor = FastProcessor::new(
         StackInputs::new(&[Felt::new(1).unwrap(), Felt::new(2).unwrap()]).unwrap(),
     );
-    let ctx = processor.get_initial_resume_context_for_package(package.clone()).unwrap();
-    let mut observer = Observer::new();
-    run_to_end(&mut processor, &mut host, ctx, &mut observer).unwrap();
-    let output = observer.finish("round-trip".into(), RunOutcome::Failed("boom".into()));
+    let mut stepper = Stepper::for_package(processor, package.clone()).unwrap();
+    let mut collector = Collector::new();
+    stepper.run_sync(&mut host, |cycle| collector.on_cycle(cycle)).unwrap();
+    let output = collector.finish("round-trip".into(), RunOutcome::Failed("boom".into()));
     let run_path = dir.write_output(&output).unwrap();
     // Writing the same package again is a no-op.
     dir.write_package(&output.packages[0]).unwrap();
@@ -160,4 +171,77 @@ fn coverage_dir_round_trip() {
     assert_eq!(run.cycles, output.run.cycles);
     assert_eq!(run.packages, output.run.packages);
     assert_eq!(runs[0].packages, output.run.packages);
+}
+
+/// Polls `future` to completion on the current thread.
+///
+/// The executor's future never waits on anything with a default host, so a
+/// no-op waker is enough.
+fn block_on<F: Future>(future: F) -> F::Output {
+    let mut future = pin!(future);
+    let mut cx = Context::from_waker(Waker::noop());
+    loop {
+        if let Poll::Ready(output) = future.as_mut().poll(&mut cx) {
+            return output;
+        }
+    }
+}
+
+/// Executes the fixture with `flag` and `n` through [`CoverageExecutor`], the
+/// way the protocol's transaction executor drives it.
+fn execute(package: &Package, flag: u64, n: u64) -> Result<ExecutionOutput, ExecutionError> {
+    let stack = StackInputs::new(&[Felt::new(flag).unwrap(), Felt::new(n).unwrap()]).unwrap();
+    let executor = <CoverageExecutor as ProgramExecutor>::new(
+        stack,
+        AdviceInputs::default(),
+        ExecutionOptions::default(),
+    )
+    .unwrap()
+    .with_debug_info(package.debug_info().unwrap().unwrap());
+    block_on(executor.execute(&package.unwrap_program(), &mut DefaultHost::default()))
+}
+
+/// Points the coverage directory environment variable at `dir`.
+fn set_coverage_dir(dir: &std::path::Path) {
+    // SAFETY: the suite runs under nextest, one process per test, so the
+    // process-global variable is private to this test and no other thread
+    // reads the environment concurrently.
+    unsafe { std::env::set_var(COVERAGE_DIR_ENV, dir) };
+}
+
+#[test]
+fn coverage_executor_runs_with_a_default_host() {
+    let package = fixture();
+    let thread_name = std::thread::current().name().unwrap_or("unnamed").to_owned();
+
+    let tmp = tempfile::tempdir().unwrap();
+    set_coverage_dir(tmp.path());
+    let output = execute(&package, 1, 3).unwrap();
+    let expected = FastProcessor::new(
+        StackInputs::new(&[Felt::new(1).unwrap(), Felt::new(3).unwrap()]).unwrap(),
+    )
+    .execute_sync(&package.unwrap_program(), &mut DefaultHost::default())
+    .unwrap();
+    assert_eq!(output.stack, expected.stack);
+
+    let dir = CoverageDir::new(tmp.path());
+    let runs = dir.read_runs().unwrap();
+    assert_eq!(runs.len(), 1);
+    assert_eq!(runs[0].name, thread_name);
+    assert_eq!(runs[0].outcome, RunOutcome::Ok);
+    assert_eq!(runs[0].packages.len(), 1);
+    let (commitment, hits) = &runs[0].packages[0];
+    assert_eq!(*commitment, package.mast_forest_commitment());
+    assert!(!hits.is_empty());
+    let packages = dir.read_packages().unwrap();
+    assert_eq!(packages.len(), 1);
+    assert_eq!(packages[0].commitment, package.mast_forest_commitment());
+
+    // A flag that is not binary fails the `if.true`; the run is still written.
+    let tmp = tempfile::tempdir().unwrap();
+    set_coverage_dir(tmp.path());
+    execute(&package, 2, 3).unwrap_err();
+    let runs = CoverageDir::new(tmp.path()).read_runs().unwrap();
+    assert_eq!(runs.len(), 1);
+    assert!(matches!(runs[0].outcome, RunOutcome::Failed(_)), "{:?}", runs[0].outcome);
 }

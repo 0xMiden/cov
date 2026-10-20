@@ -16,7 +16,8 @@ use miden_cov::{
     BranchCoverage, FileCoverage, FunctionCoverage, Report, ReportFilter, Snapshot, SourceResolver,
     build_report,
 };
-use miden_cov_collector::{Observer, RunOutcome, dir::CoverageDir, run_to_end};
+use miden_cov_collector::{Collector, RunOutcome, dir::CoverageDir};
+use miden_debug_engine::Stepper;
 use miden_mast_package::Package;
 use miden_processor::{DefaultHost, ExecutionError, FastProcessor, StackInputs};
 
@@ -42,15 +43,15 @@ pub fn record_run(
     stack: &[u64],
 ) -> Result<(), ExecutionError> {
     let stack: Vec<Felt> = stack.iter().map(|value| Felt::new(*value).unwrap()).collect();
-    let mut processor = FastProcessor::new(StackInputs::new(&stack).unwrap());
-    let ctx = processor.get_initial_resume_context_for_package(package.clone()).unwrap();
-    let mut observer = Observer::new();
-    let result = run_to_end(&mut processor, &mut host, ctx, &mut observer);
+    let processor = FastProcessor::new(StackInputs::new(&stack).unwrap());
+    let mut stepper = Stepper::for_package(processor, package.clone()).unwrap();
+    let mut collector = Collector::new();
+    let result = stepper.run_sync(&mut host, |cycle| collector.on_cycle(cycle));
     let outcome = match &result {
         Ok(()) => RunOutcome::Ok,
         Err(error) => RunOutcome::Failed(error.to_string()),
     };
-    coverage.write_output(&observer.finish(name.to_owned(), outcome)).unwrap();
+    coverage.write_output(&collector.finish(name.to_owned(), outcome)).unwrap();
     result
 }
 
