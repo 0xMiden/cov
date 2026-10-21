@@ -213,9 +213,9 @@ fn body_starts_with_control_flow() {
     assert_eq!(branches(file), [(2, true, [2, 1]), (11, true, [4, 3])]);
 }
 
-/// Branch arms and a loop body that consist of a bare `exec`: the arm is the
-/// callee's root source node, which every call site of the callee shares, so
-/// its starts are not the times the arm was taken.
+/// Branch arms and a loop body that consist of a bare `exec`: each arm is
+/// its own copy of the callee's tree, so the counts come out right from the
+/// copies as well as from the edges the collector records.
 #[test]
 fn arms_that_are_procedure_calls() {
     let (_tmp, coverage) = coverage_dir();
@@ -296,6 +296,33 @@ fn procedure_of_only_execs() {
         &[("leaf_a", 1, 4), ("leaf_b", 7, 4), ("only_execs", 15, 4), ("$main", 20, 2)],
     );
     assert_eq!(branches(file), [(2, true, [1, 3]), (8, true, [1, 3])]);
+}
+
+/// A `call` inside an inlined procedure clones the callee's tree without an
+/// inline call naming it, and a procedure both inlined and called: every
+/// entry counts, whichever way the body was reached. `middle` has no row of
+/// its own and a body of its own (two `exec`s), which is what lets the clone
+/// be credited to it.
+#[test]
+fn procedures_reached_by_exec_and_call() {
+    let (_tmp, coverage) = coverage_dir();
+    let source = fixture("exec_call");
+    record_runs(&coverage, &assemble_program(&source), &[&[]]);
+    let report = default_report(&coverage);
+    let file = only_file(&report, &source);
+
+    // `leaf` runs twice through `middle` and three times through `wrapped`.
+    assert_eq!(file.lines, BTreeMap::from([(1, 5), (2, 5), (5, 1), (10, 1), (14, 3), (18, 1)]));
+    assert_functions(
+        &functions(file),
+        &[
+            ("leaf", 1, 5),
+            ("middle", 5, 1),
+            ("outer", 10, 1),
+            ("wrapped", 14, 3),
+            ("$main", 18, 1),
+        ],
+    );
 }
 
 /// Procedures calling each other three levels deep, each with an `if` so
