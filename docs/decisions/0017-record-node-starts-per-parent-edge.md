@@ -1,6 +1,6 @@
 # 0017: Record node starts per parent edge
 
-Status: accepted (2026-10-19). Refines 0007; premise narrowed to non-inlined calls by [0019](0019-function-entries-through-inlined-copies.md).
+Status: accepted (2026-10-19). Refines 0007; premise narrowed to non-inlined calls by [0019](0019-function-entries-through-inlined-copies.md); the open-node stack now lives in the engine, which keeps a forest boundary instead of dropping the external node on return ([0018](0018-collect-through-the-debugger-engine.md)).
 
 ## Context
 

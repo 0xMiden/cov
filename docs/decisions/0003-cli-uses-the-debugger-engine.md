@@ -1,6 +1,6 @@
 # 0003: The CLI uses the debugger engine for loading, linking, and inputs
 
-Status: accepted (2026-10-19)
+Status: accepted (2026-10-19); the observer sentence and the reference to 0004 are superseded by [0018](0018-collect-through-the-debugger-engine.md)
 
 ## Context
 

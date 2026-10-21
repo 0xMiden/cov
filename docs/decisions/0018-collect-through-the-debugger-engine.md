@@ -58,9 +58,9 @@ the VM's program-executor trait, with the host the suite supplies.
   clause of 0005 that let the collector pin ahead no longer holds; the
   protocol's test suites wait for the debugger when it lags.
 - The run file format is unchanged. The shape matrix, the shared-arms test,
-  and the differential test pass unchanged; the differential test is now the
-  contract test of the engine's hook against the engine's own row
-  attribution.
+  and the differential test pass with unchanged expectations; the
+  differential test is now the contract test of the engine's hook against the
+  engine's own row attribution.
 - Collection never goes through the debug executor, whose per-cycle
   bookkeeping costs about twice the stepper; the debug executor goes through
   the same resolution and stays the debugger's own. Rust coverage needs more
@@ -70,8 +70,15 @@ the VM's program-executor trait, with the host the suite supplies.
   rebuild the execution output from a stepped processor (the stepper clones
   the deferred state to export the witness); no way to start a stepped
   execution at a given entry-point source node, so the program executor
-  starts from the unique source root; the supplied debug info is deep-copied
-  on the first step of a context built from a bare program.
+  steps from the unique source root when that is the node asked for and
+  otherwise runs the plain processor without collecting, saying so on
+  standard error; the supplied debug info is deep-copied on the first step
+  of a context built from a bare program.
+- With the coverage directory variable unset, the program executor runs the
+  plain processor: an enabled feature costs nothing until coverage is asked
+  for (0011 holds). The run is named after the thread that starts the
+  execution, which under the standard test runner is the test; a runtime
+  that starts executions from worker threads loses that attribution.
 - The engine's debug executor gained a field, which breaks construction by
   struct literal; the debugger's own TUI did that and was updated. The rest
   of the engine change is additive.

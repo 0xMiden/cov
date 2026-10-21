@@ -6,12 +6,15 @@
 //! operation index, node starts). The engine's `DebugExecutor` separately
 //! exposes, after each `step()`, the operation just executed (`current_op`)
 //! and the row it attributes it to (`current_asmop`), computed from the padded
-//! operation index through the asm-op lookup. Every program here runs through
-//! the collector driven by the engine's `Stepper` and through the
-//! `DebugExecutor` with the same package and inputs, and the attributions must
-//! agree. This is the contract test of the engine's per-cycle hook and of
-//! `Stepper` against `DebugExecutor`, and a disagreement shows up without
-//! hand-written expectations.
+//! operation index through the asm-op lookup. Both take the source node and
+//! the operation index from the engine's one source resolution, so this test
+//! cannot catch an attribution that resolution gets wrong for both; it catches
+//! a record dropped or doubled by `Stepper` against `DebugExecutor`, a `RESPAN`
+//! counted as an operation, a forest keyed wrong, and a row rule that does not
+//! match the engine's. Every program here runs through the collector driven
+//! by the engine's `Stepper` and through the `DebugExecutor` with the same
+//! package and inputs, and the attributions must agree without hand-written
+//! expectations.
 //!
 //! # The engine side
 //!

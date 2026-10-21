@@ -78,8 +78,7 @@ fn core_host() -> DefaultHost {
     host
 }
 
-/// The processor alone, no stepping. Returns the cycle count from a stepped
-/// run, since the output does not carry it.
+/// The processor alone, no stepping.
 fn floor(program: &Program, package: &Arc<Package>) {
     let mut host = core_host();
     let debug_info = package.debug_info().unwrap().unwrap();

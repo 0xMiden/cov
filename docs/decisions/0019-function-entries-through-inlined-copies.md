@@ -26,6 +26,16 @@ the middle of a block. On a block the entry counts once per execution of the
 first operation of the call's range; on a control node, which has no
 operations, once per start of the node.
 
+A `call` inside such a copy clones the callee's tree too, without an inline
+call naming the callee: the clone's root is the `call` node's child, and it
+is entered once per start of that child. It is credited to the one function
+whose MAST root it is. A root shared by several functions is skipped: two
+procedures whose bodies compile to the same MAST, such as a procedure made
+of one `exec` of another, cannot be told apart by their roots, and such a
+procedure reached only by a `call` inside an inlined copy reports zero. The
+assembler should mark cloned call targets like inlined copies, which would
+close that gap; that is raised upstream.
+
 The primary rule stays: a function with a coverable row of its own counts
 the hits of its first such row, which also sees bodies entered from another
 package, whose starts the collector never observes.

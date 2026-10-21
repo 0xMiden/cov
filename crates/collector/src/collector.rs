@@ -20,15 +20,21 @@ use crate::{
 /// reused while it is recording.
 #[derive(Default)]
 pub struct Collector {
+    /// The forests seen so far, keyed by the address of their allocation.
     forests: BTreeMap<usize, ForestEntry>,
+    /// Number of records received.
     cycles: u64,
 }
 
 /// What the collector knows about one forest.
 struct ForestEntry {
+    /// The forest itself, kept so its address stays taken.
     forest: Arc<MastForest>,
+    /// The forest's commitment, which names the package in the run file.
     commitment: Word,
+    /// The debug info of the forest's package, if it carried any.
     debug_info: Option<Arc<PackageDebugInfo>>,
+    /// The hits recorded against the package's debug info.
     hits: PackageHits,
 }
 
@@ -66,6 +72,8 @@ impl Collector {
                 hits.record_edge_start(parent.into(), start.node.into());
             }
         }
+        // A `RESPAN` cycle carries the index of the next batch's first
+        // operation but executes none; only a cycle with an operation is a hit.
         if cycle.op.is_some()
             && let (Some(node), Some(op_idx)) = (cycle.source_node, cycle.op_idx)
         {
@@ -101,6 +109,7 @@ impl Collector {
         }
     }
 
+    /// The entry of `forest`, created with `debug_info` on first sight.
     fn entry(
         &mut self,
         forest: &Arc<MastForest>,

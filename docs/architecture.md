@@ -111,10 +111,11 @@ This is the specification the collector and reporter implement together.
    That counts inlined copies and bodies entered from another package, which
    never start the function's own root node, and skips rows of procedures
    inlined into the body. A function with no coverable row of its own
-   counts the starts of its root and the entries of its inlined copies,
-   found where a copy's inline call begins. Its definition line is credited
-   with that count, because LCOV consumers reject a function record without
-   a line record.
+   counts the starts of its root, the entries of its inlined copies, found
+   where a copy's inline call begins, and the starts of the copies a `call`
+   inside an inlined copy makes, when the copied root belongs to that
+   function alone. Its definition line is credited with that count, because
+   LCOV consumers reject a function record without a line record.
 7. Hits are counts. Any consumer that wants booleans truncates at output time.
 
 ## Branch semantics
@@ -174,18 +175,20 @@ aborts the report.
 A test suite opts in by enabling the collector as a dependency and pointing
 the protocol's transaction executor at the collector's program executor, which
 runs the program through the engine's stepper with the suite's own host. The
-collector writes only when the coverage directory environment variable is
-set, so an enabled feature with no environment variable changes nothing but
-the stepping cost. Each VM run, which under the usual test runner means each
+collector steps and writes only when the coverage directory environment
+variable is set; with the feature on and the variable unset, the program runs
+through the plain processor and nothing changes. Each VM run, which under the usual test runner means each
 test, writes its own run file named after the test; no global state is shared
 between tests. Coverage never changes a test's outcome: a run file that cannot
 be written is reported and the execution's outputs are returned as usual.
 
 ## Version policy
 
-All Miden dependencies come from published releases, never git pins. The
-workspace tracks one VM release: the one the debugger engine pins, since every
-crate here builds on the engine. If the protocol moves to a VM release the
+Miden dependencies are published releases. A change that needs an engine
+that is not released yet builds against the engine's branch, with the decision
+record naming it, and does not merge until the release exists. The workspace
+tracks one VM release: the one the debugger engine pins, since every crate
+here builds on the engine. If the protocol moves to a VM release the
 debugger does not yet support, coverage of the protocol's tests waits for the
 debugger to follow.
 
