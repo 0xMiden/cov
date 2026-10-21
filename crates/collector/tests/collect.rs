@@ -46,6 +46,7 @@ begin
 end
 "#;
 
+/// The fixture, assembled from the source above.
 fn fixture() -> Arc<Package> {
     Arc::from(Assembler::default().assemble_program("fixture", SRC).unwrap())
 }
@@ -92,6 +93,8 @@ fn source_node(package: &Package, pred: impl Fn(&MastNode) -> bool) -> Vec<u32> 
     found
 }
 
+/// Node, edge, and operation hits of the fixture for a run that takes the `if`
+/// and loops, and one that takes the `else` and skips the loop.
 #[test]
 fn hits_follow_the_control_flow() {
     let package = fixture();
@@ -146,6 +149,7 @@ fn hits_follow_the_control_flow() {
     assert_eq!(hits.node_starts.get(&skip_src), Some(&1));
 }
 
+/// A run and its package survive the trip through the coverage directory.
 #[test]
 fn coverage_dir_round_trip() {
     let package = fixture();
@@ -218,32 +222,57 @@ fn execute(
     block_on(executor.execute(&package.unwrap_program(), &mut DefaultHost::default()))
 }
 
-/// The outputs of the fixture from the processor alone.
-fn expected_output(package: &Package, flag: u64, n: u64) -> ExecutionOutput {
-    FastProcessor::new(
-        StackInputs::new(&[Felt::new(flag).unwrap(), Felt::new(n).unwrap()]).unwrap(),
+/// The outputs of the fixture from the processor's own program executor,
+/// with the same debug info and entry point.
+fn expected_output(
+    package: &Package,
+    flag: u64,
+    n: u64,
+    entrypoint: Option<DebugSourceNodeId>,
+) -> Result<ExecutionOutput, ExecutionError> {
+    let stack = StackInputs::new(&[Felt::new(flag).unwrap(), Felt::new(n).unwrap()]).unwrap();
+    let processor = <FastProcessor as ProgramExecutor>::new(
+        stack,
+        AdviceInputs::default(),
+        ExecutionOptions::default(),
     )
-    .execute_sync(&package.unwrap_program(), &mut DefaultHost::default())
     .unwrap()
+    .with_debug_info(package.debug_info().unwrap().unwrap())
+    .with_entrypoint_source_node(entrypoint);
+    block_on(<FastProcessor as ProgramExecutor>::execute(
+        processor,
+        &package.unwrap_program(),
+        &mut DefaultHost::default(),
+    ))
 }
 
-/// Runs the ignored test `name` of this binary in a child process, with the
-/// coverage directory variable set to `dir` or removed.
+/// A program whose outputs are not all zero, so a reversed or dropped stack
+/// shows: it leaves 11 on top of the stack.
+fn sum_program() -> Arc<Package> {
+    Arc::from(
+        Assembler::default()
+            .assemble_program("sum", "begin push.5 push.6 add swap drop end")
+            .unwrap(),
+    )
+}
+
+/// Runs the ignored test `name` of this binary in a child process started in
+/// `cwd`, with the coverage directory variable set to `dir` or removed.
 ///
 /// The variable is process-global and reading it from another thread while it
 /// changes is undefined behavior, so it is only ever set for a child process.
-fn run_in_child(name: &str, dir: Option<&std::path::Path>) {
+fn run_in_child(name: &str, cwd: &std::path::Path, dir: Option<&std::path::Path>) {
     let mut command = Command::new(std::env::current_exe().unwrap());
-    command.args(["--exact", name, "--ignored", "--nocapture"]);
+    command.args(["--exact", name, "--ignored", "--nocapture"]).current_dir(cwd);
     match dir {
         Some(dir) => command.env(COVERAGE_DIR_ENV, dir),
         None => command.env_remove(COVERAGE_DIR_ENV),
     };
     let output = command.output().unwrap();
+    let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(
-        output.status.success(),
-        "{name} failed:\n{}\n{}",
-        String::from_utf8_lossy(&output.stdout),
+        output.status.success() && stdout.contains("test result: ok. 1 passed"),
+        "{name} did not run once and pass:\n{stdout}\n{}",
         String::from_utf8_lossy(&output.stderr)
     );
 }
@@ -257,9 +286,10 @@ fn coverage_executor_child_with_directory() {
     assert!(CoverageDir::from_env().is_some(), "the parent sets the directory");
     let package = fixture();
     let output = execute(&package, 1, 3, None).unwrap();
-    assert_eq!(output.stack, expected_output(&package, 1, 3).stack);
-    // A flag that is not binary fails the `if.true`.
-    execute(&package, 2, 3, None).unwrap_err();
+    assert_eq!(output.stack, expected_output(&package, 1, 3, None).unwrap().stack);
+    // A flag that is not binary fails the `if.true` with the processor's error.
+    let error = execute(&package, 2, 3, None).unwrap_err().to_string();
+    assert!(error.contains("not a binary") || error.contains("binary"), "{error}");
     // The entry point's unique source root is where stepping starts anyway.
     let debug_info = package.debug_info().unwrap().unwrap();
     let root = debug_info
@@ -267,11 +297,13 @@ fn coverage_executor_child_with_directory() {
         .unwrap()
         .unwrap();
     execute(&package, 1, 3, Some(root)).unwrap();
-    // Any other node cannot be reached by stepping: the program still runs,
-    // through the plain processor, and nothing is written.
+    // Any other node cannot be reached by stepping: the program goes to the
+    // processor's own executor, which rejects a node that is not the entry's,
+    // and nothing is written.
     let other = DebugSourceNodeId::from(if u32::from(root) == 0 { 1 } else { 0 });
-    let output = execute(&package, 1, 3, Some(other)).unwrap();
-    assert_eq!(output.stack, expected_output(&package, 1, 3).stack);
+    let ours = execute(&package, 1, 3, Some(other)).unwrap_err().to_string();
+    let theirs = expected_output(&package, 1, 3, Some(other)).unwrap_err().to_string();
+    assert_eq!(ours, theirs);
 }
 
 /// The body of the child process without the coverage directory: the program
@@ -282,17 +314,59 @@ fn coverage_executor_child_without_directory() {
     assert!(CoverageDir::from_env().is_none(), "the parent removes the directory");
     let package = fixture();
     let output = execute(&package, 1, 3, None).unwrap();
-    let expected = expected_output(&package, 1, 3);
+    let expected = expected_output(&package, 1, 3, None).unwrap();
     assert_eq!(output.stack, expected.stack);
-    assert_eq!(output.precompile_witness.is_some(), expected.precompile_witness.is_some());
-    execute(&package, 2, 3, None).unwrap_err();
+    let ours = execute(&package, 2, 3, None).unwrap_err().to_string();
+    let theirs = expected_output(&package, 2, 3, None).unwrap_err().to_string();
+    assert_eq!(ours, theirs);
+    // A program with a non-trivial stack, through both executors.
+    let sum = sum_program();
+    let executor = <CoverageExecutor as ProgramExecutor>::new(
+        StackInputs::default(),
+        AdviceInputs::default(),
+        ExecutionOptions::default(),
+    )
+    .unwrap()
+    .with_debug_info(sum.debug_info().unwrap().unwrap());
+    let output =
+        block_on(executor.execute(&sum.unwrap_program(), &mut DefaultHost::default())).unwrap();
+    assert_eq!(output.stack.get_element(0), Some(Felt::new(11).unwrap()));
 }
 
+/// The body of the child process for a program whose outputs are not all
+/// zero, with the coverage directory set: the stepper's outputs are the
+/// processor's.
+#[test]
+#[ignore = "run by coverage_executor_writes_one_run_per_execution in a child process"]
+fn coverage_executor_child_outputs() {
+    assert!(CoverageDir::from_env().is_some(), "the parent sets the directory");
+    let sum = sum_program();
+    let executor = <CoverageExecutor as ProgramExecutor>::new(
+        StackInputs::default(),
+        AdviceInputs::default(),
+        ExecutionOptions::default(),
+    )
+    .unwrap()
+    .with_debug_info(sum.debug_info().unwrap().unwrap());
+    let output =
+        block_on(executor.execute(&sum.unwrap_program(), &mut DefaultHost::default())).unwrap();
+    let expected = FastProcessor::new(StackInputs::default())
+        .execute_sync(&sum.unwrap_program(), &mut DefaultHost::default())
+        .unwrap();
+    assert_eq!(output.stack, expected.stack);
+    assert_eq!(output.stack.get_element(0), Some(Felt::new(11).unwrap()));
+    assert_eq!(output.precompile_witness.is_some(), expected.precompile_witness.is_some());
+}
+
+/// One run per execution with the directory set, none without it, and the
+/// same hits as the package entry collects.
 #[test]
 fn coverage_executor_writes_one_run_per_execution() {
     let package = fixture();
     let tmp = tempfile::tempdir().unwrap();
-    run_in_child("coverage_executor_child_with_directory", Some(tmp.path()));
+    let cwd = tempfile::tempdir().unwrap();
+    run_in_child("coverage_executor_child_with_directory", cwd.path(), Some(tmp.path()));
+    assert_eq!(std::fs::read_dir(cwd.path()).unwrap().count(), 0, "nothing lands in the cwd");
 
     let dir = CoverageDir::new(tmp.path());
     let runs = dir.read_runs().unwrap();
@@ -314,8 +388,14 @@ fn coverage_executor_writes_one_run_per_execution() {
     assert_eq!(packages.len(), 1);
     assert_eq!(packages[0].commitment, package.mast_forest_commitment());
 
+    let outputs = tempfile::tempdir().unwrap();
+    run_in_child("coverage_executor_child_outputs", cwd.path(), Some(outputs.path()));
+    assert_eq!(CoverageDir::new(outputs.path()).read_runs().unwrap().len(), 1);
+
+    // Without the directory the child runs from an empty directory, where the
+    // default coverage directory would be created if anything were written.
     let empty = tempfile::tempdir().unwrap();
-    run_in_child("coverage_executor_child_without_directory", None);
+    run_in_child("coverage_executor_child_without_directory", empty.path(), None);
     assert_eq!(std::fs::read_dir(empty.path()).unwrap().count(), 0);
 }
 
