@@ -261,7 +261,7 @@ fn sum_program() -> Arc<Package> {
 ///
 /// The variable is process-global and reading it from another thread while it
 /// changes is undefined behavior, so it is only ever set for a child process.
-fn run_in_child(name: &str, cwd: &std::path::Path, dir: Option<&std::path::Path>) {
+fn run_in_child(name: &str, cwd: &std::path::Path, dir: Option<&std::path::Path>) -> String {
     let mut command = Command::new(std::env::current_exe().unwrap());
     command.args(["--exact", name, "--ignored", "--nocapture"]).current_dir(cwd);
     match dir {
@@ -277,6 +277,7 @@ fn run_in_child(name: &str, cwd: &std::path::Path, dir: Option<&std::path::Path>
             && !stderr.contains("skipped:"),
         "{name} did not run once and pass:\n{stdout}\n{stderr}"
     );
+    stderr.into_owned()
 }
 
 /// The body of the child process with the coverage directory set: one run
@@ -457,7 +458,9 @@ fn coverage_executor_writes_one_run_per_execution() {
     let package = fixture();
     let tmp = tempfile::tempdir().unwrap();
     let cwd = tempfile::tempdir().unwrap();
-    run_in_child("coverage_executor_child_with_directory", cwd.path(), Some(tmp.path()));
+    let notes =
+        run_in_child("coverage_executor_child_with_directory", cwd.path(), Some(tmp.path()));
+    assert!(notes.contains("cannot be reached by stepping"), "{notes}");
     assert_eq!(std::fs::read_dir(cwd.path()).unwrap().count(), 0, "nothing lands in the cwd");
 
     let dir = CoverageDir::new(tmp.path());
@@ -481,7 +484,8 @@ fn coverage_executor_writes_one_run_per_execution() {
     assert_eq!(packages[0].commitment, package.mast_forest_commitment());
 
     let outputs = tempfile::tempdir().unwrap();
-    run_in_child("coverage_executor_child_outputs", cwd.path(), Some(outputs.path()));
+    let notes = run_in_child("coverage_executor_child_outputs", cwd.path(), Some(outputs.path()));
+    assert!(notes.contains("no unique source root"), "{notes}");
     assert_eq!(CoverageDir::new(outputs.path()).read_runs().unwrap().len(), 1);
 
     // Without the directory the child runs from an empty directory, where the

@@ -22,16 +22,16 @@ use crate::collector::Collector;
 /// writes one run file named after the thread that started it, which under
 /// the standard test runner is the test; otherwise, and without `std`, the
 /// program runs through the processor's own [`ProgramExecutor`] and nothing
-/// changes. Coverage never changes the
-/// outcome of an execution: a run file that cannot be written is reported on
-/// standard error and the outputs are returned as usual.
+/// changes. Coverage never changes the outcome of an execution: a run file
+/// that cannot be written is reported on standard error and the outputs are
+/// returned as usual.
 ///
 /// The step API cannot start from a given entry-point source node; it starts
 /// from the unique source root of the entry point. When an entry-point node is
 /// supplied and that root is not the same node, or when none is supplied and
-/// the entry point has no unique root, the program runs through the
-/// processor's own executor without collecting, and says so on standard
-/// error.
+/// the processor's own executor would refuse the entry point as ambiguous,
+/// the program runs through that executor without collecting, and says so on
+/// standard error.
 pub struct CoverageExecutor {
     /// The processor configured with the inputs and the options.
     processor: FastProcessor,
@@ -121,7 +121,7 @@ impl ProgramExecutor for CoverageExecutor {
 /// root before any cycle, and so must this one, through that executor.
 ///
 /// Says on standard error when it does not, since the execution then runs
-/// without coverage.
+/// without coverage, or fails before any cycle in the ambiguous case.
 fn startable_by_stepping(
     program: &Program,
     debug_info: &PackageDebugInfo,
@@ -142,8 +142,7 @@ fn startable_by_stepping(
              without coverage"
         ),
         None => std::eprintln!(
-            "miden-cov: the entry point has no unique source root; running without coverage, \
-             which fails the same way"
+            "miden-cov: the entry point has no unique source root; running without coverage"
         ),
     }
     false
