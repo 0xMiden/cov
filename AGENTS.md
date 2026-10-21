@@ -24,6 +24,6 @@ change; it is short and it defines the vocabulary used everywhere in the code.
 ## Commands
 
 - `make lint` runs format check, clippy with warnings denied, cargo-shear, and
-  the collector's no-std build.
+  clippy of the collector without its std feature.
 - `make test` runs the whole test suite with nextest.
 - `make format` formats with the pinned rustfmt toolchain.
