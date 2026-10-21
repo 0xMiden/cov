@@ -31,10 +31,16 @@ A `call` inside such a copy clones the callee's tree too, without an inline
 call naming the callee: the clone's root is the `call` node's child, shared
 by every `call` of the callee within the copy, and each `call` node enters it
 once per edge from the node to the child. It is credited to the one function
-whose MAST root it is, looked up across the packages of the run: a `call`
-into a linked library names a procedure whose record lives there and whose
-root start the collector never sees, so the edges are its only count. A root
-shared by several functions is skipped: two procedures
+whose MAST root it is, in the calling package first; a `call` into a linked
+library names a procedure whose record lives there and whose root start the
+collector never sees, so when the caller has no record of the root the other
+packages of the run are asked, and the edges are the library's only count.
+The same procedure is recorded in many packages of a run, a library linked
+into two programs, or a library's whole table imported into a program that
+`exec`s one of its procedures, and those records agree on the function's file,
+line, and name, which is also what the report tallies under; only records
+that disagree make a root ambiguous. A root shared by several functions is
+skipped: two procedures
 whose bodies compile to the same MAST, such as a procedure made of one
 `exec` of another, cannot be told apart by their roots, and the entries of
 such a procedure through a `call` inside an inlined copy are not counted.
@@ -49,7 +55,7 @@ Edges (0017) stay. Inlined arms have their own nodes, and so does every
 `call` node; what the `call`s of one procedure within one copy share is the
 clone, which is why their entries are edges. The assembler also records a
 re-exported procedure twice, differing only in the linkage name; the reporter
-folds the duplicates into the first record before it counts.
+folds records that agree on everything else into the first before it counts.
 
 The call rule rests on the collector never seeing the root start of a
 procedure entered from another package: if the engine ever described it, the

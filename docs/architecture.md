@@ -35,9 +35,10 @@ processes or machines merge by landing in the same directory.
 - **collector**: counts the per-cycle records the debugger engine produces and
   writes a run file. It also provides the program-executor implementation that
   test suites plug into the protocol's transaction executor; when a coverage
-  directory is configured and the program has debug info, that executor drives
-  the engine's host-agnostic stepper with the host the test suite supplies, and
-  otherwise hands the program to the processor's own executor. The engine is
+  directory is configured and the program's entry point can be attributed to
+  source, that executor drives the engine's host-agnostic stepper with the host
+  the test suite supplies, and otherwise hands the program to the processor's
+  own executor. The engine is
   the only reader of the VM's continuation stream: the collector never
   interprets continuations itself.
 - **cov**: reads a coverage directory, merges runs, resolves source files,
@@ -101,20 +102,26 @@ This is the specification the collector and reporter implement together.
    inlined at several call sites, and their counts are summed.
 4. A location is credited to the line where it starts. Control rows span their
    whole block, and crediting every line in the span would mark unexecuted
-   lines as covered. 5. A line's hit count is the maximum over the locations
-   credited to it, never the sum, because one line can hold several
-   instructions that each execute once per pass. 6. A function is hit each time
-   the first coverable location that belongs to it is hit: the first row in its
-   body, in execution order, whose procedure path is the function's own,
-   stopping at the first conditional or loop. That counts inlined copies and
-   bodies entered from another package, which never start the function's own
-   root node, and skips rows of procedures inlined into the body. A function
-   with no coverable row of its own counts the starts of its root, the entries
-   of its inlined copies, found where a copy's inline call begins, and the
-   edges into the tree a `call` node calls, when that tree's root belongs to
-   that function alone. Its definition line is credited with that count,
-   because LCOV consumers reject a function record without a line record. 7.
-   Hits are counts. Any consumer that wants booleans truncates at output time.
+   lines as covered.
+5. A line's hit count is the maximum over the locations credited to it, never
+   the sum, because one line can hold several instructions that each execute
+   once per pass.
+6. A function is hit each time the first coverable location that belongs to it
+   is hit: the first row in its body, in execution order, whose procedure path
+   is the function's own, stopping at the first conditional or loop. That
+   counts inlined copies and bodies entered from another package, which never
+   start the function's own root node, and skips rows of procedures inlined
+   into the body. A function with no coverable row of its own counts the
+   starts of its root, the entries of its inlined copies, found where a copy's
+   inline call begins, and the edges into the tree a `call` node calls, when
+   that tree's root belongs to one function: the calling package's record of
+   it, or, when it has none, the one function the other packages of the run
+   agree on. This rests on the collector never seeing the root start of a
+   procedure entered from another package; if it did, the root's starts and
+   the edges would both count the entry. Its definition line is credited with
+   that count, because LCOV consumers reject a function record without a line
+   record.
+7. Hits are counts. Any consumer that wants booleans truncates at output time.
 
 ## Branch semantics
 
@@ -182,8 +189,9 @@ execution's outputs are returned as usual.
 ## Version policy
 
 Miden dependencies are published releases. A change that needs an engine that
-is not released yet builds against the engine's branch, with the decision
-record naming it, and does not merge until the release exists. The workspace
+is not released yet builds against a pinned commit of the engine's branch, with
+the decision record naming the branch, and does not merge until the release
+exists. The workspace
 tracks one VM release: the one the debugger engine pins, since every crate here
 builds on the engine. If the protocol moves to a VM release the debugger does
 not yet support, coverage of the protocol's tests waits for the debugger to

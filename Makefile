@@ -51,7 +51,7 @@ shear: ## Runs cargo-shear to find unused or misplaced dependencies
 	cargo shear
 
 .PHONY: check-no-std
-check-no-std: ## Checks that the collector builds without its std feature, warnings denied
+check-no-std: ## Lints the collector without its std feature, warnings denied
 	cargo clippy -p miden-cov-collector --no-default-features -- -D warnings
 
 .PHONY: lint

@@ -89,9 +89,10 @@ the VM's program-executor trait, with the host the suite supplies.
   MAST as another procedure of the library, such as a wrapper made of one
   `exec`: the processor cannot pick the source root of the entry and tracks no
   source nodes for that invocation. A VM gap, to be raised upstream; the
-  reporter test that shows it is ignored until then. The run is named after the thread that starts the
-  execution, which under the standard test runner is the test; a runtime
-  that starts executions from worker threads loses that attribution.
+  reporter test that shows it is ignored until then.
+- The run is named after the thread that starts the execution, which under
+  the standard test runner is the test; a runtime that starts executions from
+  worker threads loses that attribution.
 - The engine's debug executor gained a field, which breaks construction by
   struct literal; the debugger's own TUI did that and was updated. The rest
   of the engine change is additive.
