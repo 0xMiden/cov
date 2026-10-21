@@ -1,0 +1,15 @@
+proc leaf
+    push.1 drop
+end
+
+proc wrapper
+    exec.leaf
+end
+
+proc outer
+    call.wrapper
+end
+
+begin
+    exec.outer
+end

@@ -1,0 +1,13 @@
+proc leaf
+    push.1 drop
+end
+
+proc twice
+    exec.leaf
+    exec.leaf
+end
+
+begin
+    assert
+    exec.twice
+end

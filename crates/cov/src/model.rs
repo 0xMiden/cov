@@ -13,7 +13,9 @@ use miden_core::{
 };
 use miden_cov_collector::{PackageFile, PackageHits};
 use miden_debug_types::Location;
-use miden_mast_package::debug_info::{DebugSourceAsmOp, DebugSourceNode, DebugSourceNodeId};
+use miden_mast_package::debug_info::{
+    DebugSourceAsmOp, DebugSourceInlineCall, DebugSourceNode, DebugSourceNodeId,
+};
 
 use crate::{
     ReportFilter, Snapshot,
@@ -108,10 +110,42 @@ pub fn build_report(
     // because a body may run through another package's copy of it.
     let mut functions: BTreeMap<(Arc<str>, u32, String), FunctionTally> = BTreeMap::new();
     let no_hits = PackageHits::default();
+    let views: Vec<(Word, PackageView<'_>)> = snapshot
+        .packages
+        .iter()
+        .map(|(commitment, package)| {
+            (
+                *commitment,
+                PackageView::new(package, snapshot.merged.get(commitment).unwrap_or(&no_hits)),
+            )
+        })
+        .collect();
 
-    for (commitment, package) in &snapshot.packages {
-        let package =
-            PackageView::new(package, snapshot.merged.get(commitment).unwrap_or(&no_hits));
+    // The assembler records a re-exported procedure twice, once per name,
+    // pointing at the same root: the first record stands for the group.
+    // Roots are looked up across packages, because a `call` into a linked
+    // library names a procedure whose record lives there.
+    let canonical: Vec<Vec<u32>> =
+        views.iter().map(|(_, package)| package.canonical_functions()).collect();
+    let mut roots: BTreeMap<Word, Option<(Word, u32)>> = BTreeMap::new();
+    for ((commitment, package), canonical) in views.iter().zip(&canonical) {
+        for (idx, function) in package.package.debug_info.functions().iter().enumerate() {
+            if canonical[idx] != idx as u32 {
+                continue;
+            }
+            roots
+                .entry(function.mast_root)
+                .and_modify(|unique| *unique = None)
+                .or_insert(Some((*commitment, idx as u32)));
+        }
+    }
+    // Entries into a function through the `call` nodes of any package, keyed
+    // by the callee's package and record.
+    let mut call_entries: BTreeMap<(Word, u32), u64> = BTreeMap::new();
+    // Entries into a function through the inlined copies of its own package.
+    let mut inline_entries: Vec<BTreeMap<u32, u64>> = Vec::with_capacity(views.len());
+
+    for ((commitment, package), canonical) in views.iter().zip(&canonical) {
         let debug_info = &package.package.debug_info;
 
         for (node_id, node) in debug_info.nodes().iter().enumerate() {
@@ -137,8 +171,30 @@ pub fn build_report(
             }
         }
 
-        let copy_entries = package.copy_entries();
+        inline_entries.push(package.inline_entries(canonical));
+        for (child, digest, edges) in package.call_edges() {
+            let Some(Some((callee_package, callee))) = roots.get(&digest) else {
+                continue;
+            };
+            // The function's own root, the child of a `call` outside any copy,
+            // is counted by its starts.
+            let own_root = *callee_package == *commitment
+                && debug_info.functions()[*callee as usize].source_node.into_option()
+                    == Some(child);
+            if !own_root {
+                *call_entries.entry((*callee_package, *callee)).or_default() += edges;
+            }
+        }
+    }
+
+    for (((commitment, package), canonical), inline_entries) in
+        views.iter().zip(&canonical).zip(&inline_entries)
+    {
+        let debug_info = &package.package.debug_info;
         for (function_idx, function) in debug_info.functions().iter().enumerate() {
+            if canonical[function_idx] != function_idx as u32 {
+                continue;
+            }
             let Some(stored_path) = debug_info
                 .get_file(function.file_idx)
                 .and_then(|file| debug_info.get_string(file.path_idx))
@@ -149,24 +205,35 @@ pub fn build_report(
             if !files.reported.contains_key(&key) {
                 continue;
             }
-            let name = debug_info.get_string(function.name_idx);
-            let linkage_name = function
-                .linkage_name_idx
-                .into_option()
-                .and_then(|idx| debug_info.get_string(idx));
+            // Every name the group goes by: the source name and the linkage
+            // names of the record and of its re-exports.
+            let names: Vec<_> = debug_info
+                .functions()
+                .iter()
+                .enumerate()
+                .filter(|(idx, _)| canonical[*idx] == function_idx as u32)
+                .flat_map(|(_, record)| {
+                    [Some(record.name_idx), record.linkage_name_idx.into_option()]
+                })
+                .flatten()
+                .filter_map(|idx| debug_info.get_string(idx))
+                .collect();
             let is_own = |row: &DebugSourceAsmOp| {
-                let context = debug_info.get_string(row.context_name_idx);
-                context.is_some() && (context == name || context == linkage_name)
+                debug_info
+                    .get_string(row.context_name_idx)
+                    .is_some_and(|context| names.contains(&context))
             };
             let root = function.source_node.into_option();
             let entry = root.and_then(|root| match package.entry_location(root, &is_own) {
                 ControlFlow::Break(entry) => entry,
                 ControlFlow::Continue(()) => None,
             });
+            let name = debug_info.get_string(function.name_idx);
             let name = name.as_deref().unwrap_or("").to_owned();
             let tally = functions.entry((key, function.line.0 + 1, name)).or_default();
             tally.starts += root.map_or(0, |root| package.starts(root))
-                + copy_entries.get(&(function_idx as u32)).copied().unwrap_or(0);
+                + inline_entries.get(&(function_idx as u32)).copied().unwrap_or(0)
+                + call_entries.get(&(*commitment, function_idx as u32)).copied().unwrap_or(0);
             if let Some(entry) = entry {
                 tally.entry = Some(files.location_key(&entry));
             }
@@ -197,10 +264,11 @@ pub fn build_report(
         let Some(file) = reported.get_mut(&key) else {
             continue;
         };
-        // Without an entry location, fall back to the starts of the root and
-        // the entries of every copy. That misses a body of another package
-        // entered through `exec`, whose root start the collector never sees,
-        // and a kernel procedure entered through `syscall`.
+        // Without an entry location, fall back to the starts of the root, the
+        // entries of every copy, and the edges of every `call` to it. That
+        // misses a body of another package entered through `exec`, whose root
+        // start the collector never sees, and a kernel procedure entered
+        // through `syscall`.
         let count = entry.map_or(starts, |entry| entries.get(&entry).copied().unwrap_or(0));
         // The definition line is coverable and hit on every entry. A
         // procedure whose body is one basic block has no row there, and LCOV
@@ -238,36 +306,44 @@ impl<'a> PackageView<'a> {
     /// How many times `child` started as the child of `parent`.
     ///
     /// A procedure entered dynamically or from another package has one
-    /// source tree however many places call it, and a procedure entered by
-    /// `call` has one tree per inlined copy of the caller, however many
-    /// `call`s that copy holds, so an arm that is such a bare call shares
-    /// its node with other calls of that procedure; only the edge recorded
-    /// by the collector tells the arm's own starts.
+    /// source tree however many places call it, and the `call`s of one
+    /// procedure within one inlined copy of their caller share one tree, so
+    /// a node's own starts cannot tell those sites apart; the edge recorded
+    /// by the collector can.
     fn starts_from(&self, parent: u32, child: impl Into<u32>) -> u64 {
         self.hits.edge_starts.get(&(parent, child.into())).copied().unwrap_or(0)
     }
 
-    /// How many times each function was entered through a copy of its body,
-    /// keyed by function index.
+    /// For each function record, the index of the record that stands for it:
+    /// its own, or the first record with the same root when the assembler
+    /// recorded a re-export of it, which shares everything but the linkage
+    /// name.
+    fn canonical_functions(&self) -> Vec<u32> {
+        let mut first: BTreeMap<(DebugSourceNodeId, Word), u32> = BTreeMap::new();
+        self.package
+            .debug_info
+            .functions()
+            .iter()
+            .enumerate()
+            .map(|(idx, function)| match function.source_node.into_option() {
+                Some(root) => *first.entry((root, function.mast_root)).or_insert(idx as u32),
+                None => idx as u32,
+            })
+            .collect()
+    }
+
+    /// How many times each function was entered through an inlined copy of
+    /// its body, keyed by the index of the record standing for the function.
     ///
     /// The assembler emits a copy of a procedure's source tree at every
     /// `exec` of it and marks the copy's rows with an inline call naming the
-    /// procedure, so the procedure's own root runs only through a `call`. A
-    /// copy is entered where its inline call begins: at a node whose parent
-    /// does not carry the same call, or in the middle of a block. On a block
-    /// it counts once per execution of the first operation of the call's
-    /// range; on a control node, which has no operations, once per start of
-    /// the node.
-    ///
-    /// A `call` inside such a copy clones the callee's tree as well, without
-    /// an inline call naming the callee: the clone's root is the `call`
-    /// node's child, shared by every `call` of the callee within the copy.
-    /// Each `call` node enters it once per edge from the node to the child,
-    /// credited to the one function whose MAST root the child is; a root
-    /// shared by several functions cannot be credited and is skipped, and
-    /// the function's own root, the child of a `call` outside any copy, is
-    /// counted by its starts instead.
-    fn copy_entries(&self) -> BTreeMap<u32, u64> {
+    /// procedure, so the procedure's own root runs only through a `call`, as
+    /// the entry point, or as a dynamic target. A copy is entered where its
+    /// inline call begins: at a node whose parent does not carry the same
+    /// call, or in the middle of a block. On a block it counts once per
+    /// execution of the first operation of the call's range; on a control
+    /// node, which has no operations, once per start of the node.
+    fn inline_entries(&self, canonical: &[u32]) -> BTreeMap<u32, u64> {
         let debug_info = &self.package.debug_info;
         let nodes = debug_info.nodes();
         // A clone shared by several `call` nodes keeps the last of them as
@@ -281,42 +357,21 @@ impl<'a> PackageView<'a> {
                 }
             }
         }
-        // Functions by the digest of their MAST root; `None` for a digest
-        // that several functions share.
-        let mut function_by_root: BTreeMap<Word, Option<u32>> = BTreeMap::new();
-        for (idx, function) in debug_info.functions().iter().enumerate() {
-            function_by_root
-                .entry(function.mast_root)
-                .and_modify(|unique| *unique = None)
-                .or_insert(Some(idx as u32));
-        }
         let mut entries = BTreeMap::new();
         for (node_id, node) in nodes.iter().enumerate() {
-            if let Some(MastNode::Call(_)) = self.exec(node)
-                && let [child] = node.children.as_slice()
-                && let Some(child_node) = debug_info.source_node(*child)
-                && let Some(callee) = self.exec(child_node)
-                && let Some(Some(function)) = function_by_root.get(&callee.digest())
-                // The function's own root is counted by its starts.
-                && debug_info.functions()[*function as usize].source_node.into_option()
-                    != Some(*child)
-            {
-                *entries.entry(*function).or_default() += self.starts_from(node_id as u32, *child);
-            }
             if node.inline_calls.is_empty() {
                 continue;
             }
             let is_block = matches!(self.exec(node), Some(MastNode::Block(_)));
-            let inherited: Vec<_> = parent[node_id]
-                .map(|parent| {
-                    debug_info
-                        .inline_calls_for_operation(parent.into(), 0)
-                        .map(|call| (call.callee_idx, call.loc_idx))
-                        .collect()
+            let inherited = |call: &DebugSourceInlineCall| {
+                parent[node_id].is_some_and(|parent| {
+                    debug_info.inline_calls_for_operation(parent.into(), 0).any(|above| {
+                        (above.callee_idx, above.loc_idx) == (call.callee_idx, call.loc_idx)
+                    })
                 })
-                .unwrap_or_default();
+            };
             for call in &node.inline_calls {
-                if call.op_idx == 0 && inherited.contains(&(call.callee_idx, call.loc_idx)) {
+                if call.op_idx == 0 && inherited(call) {
                     continue;
                 }
                 let count = if is_block {
@@ -324,10 +379,38 @@ impl<'a> PackageView<'a> {
                 } else {
                     self.starts(node_id as u32)
                 };
-                *entries.entry(u32::from(call.callee_idx)).or_default() += count;
+                let callee = canonical
+                    .get(u32::from(call.callee_idx) as usize)
+                    .copied()
+                    .unwrap_or(u32::from(call.callee_idx));
+                *entries.entry(callee).or_default() += count;
             }
         }
         entries
+    }
+
+    /// The `call` nodes of the package: for each, its child, the digest of
+    /// the child's exec node, and the edges from the node to the child.
+    ///
+    /// A `call` inside an inlined copy clones the callee's tree without an
+    /// inline call naming the callee; the clone's root is the `call` node's
+    /// child, shared by every `call` of the callee within the copy, so the
+    /// edges, not the child's starts, are what one `call` contributes. The
+    /// child of a `call` into a linked library is that library's root,
+    /// whose start the collector never sees. The caller credits the edges to
+    /// the one function whose MAST root the child is, in whichever package.
+    fn call_edges(&self) -> impl Iterator<Item = (DebugSourceNodeId, Word, u64)> + '_ {
+        let debug_info = &self.package.debug_info;
+        debug_info.nodes().iter().enumerate().filter_map(move |(node_id, node)| {
+            if !matches!(self.exec(node), Some(MastNode::Call(_))) {
+                return None;
+            }
+            let [child] = node.children.as_slice() else {
+                return None;
+            };
+            let callee = self.exec(debug_info.source_node(*child)?)?;
+            Some((*child, callee.digest(), self.starts_from(node_id as u32, *child)))
+        })
     }
 
     /// The exec node behind a source node.

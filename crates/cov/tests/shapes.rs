@@ -362,8 +362,80 @@ fn dynamic_library_entry_sharing_a_body() {
     record_run(&coverage, &program, host, "dynamic", &[0, 1]).unwrap();
     let report = default_report(&coverage);
     let file = file(&report, &library);
-    assert_eq!(file.lines, BTreeMap::from([(1, 1), (2, 1), (3, 1), (5, 0), (9, 1), (13, 1)]));
+    // The flag is 0: the `else` arm runs.
+    assert_eq!(file.lines, BTreeMap::from([(1, 1), (2, 1), (3, 0), (5, 1), (9, 1), (13, 1)]));
     assert_functions(&functions(file), &[("leaf", 1, 1), ("middle", 9, 1), ("entry", 13, 1)]);
+}
+
+/// A procedure re-exported from another module: the assembler records it
+/// twice, once per name, and both records must count as one. `only_execs`
+/// has no row of its own and is reached by a `call` inside an inlined copy,
+/// which is the case that needs the records folded.
+#[test]
+fn reexported_procedures_count_once() {
+    let (_tmp, coverage) = coverage_dir();
+    let inner = fixture("reexport_inner");
+    let root = fixture("reexport_root");
+    let source = fixture("reexport_program");
+    let source_manager: Arc<dyn SourceManager> = Arc::new(DefaultSourceManager::default());
+    let mut assembler = Assembler::new(source_manager.clone());
+    assembler
+        .compile_and_statically_link(library_module(
+            &source_manager,
+            "fixtures::reexport_inner",
+            &inner,
+        ))
+        .unwrap()
+        .compile_and_statically_link(library_module(
+            &source_manager,
+            "fixtures::reexport_root",
+            &root,
+        ))
+        .unwrap();
+    let package = Arc::from(assembler.assemble_program("program", source).unwrap());
+    record_runs(&coverage, &package, &[&[]]);
+    let report = default_report(&coverage);
+    let file = file(&report, &inner);
+    assert_eq!(file.lines, BTreeMap::from([(1, 1), (2, 1), (5, 1), (6, 1), (9, 1), (14, 1)]));
+    assert_functions(
+        &functions(file),
+        &[("leaf1", 1, 1), ("leaf2", 5, 1), ("only_execs", 9, 1), ("entry", 14, 1)],
+    );
+}
+
+/// Two procedures whose bodies compile to the same MAST cannot be told apart
+/// by their roots, so the one reached only by a `call` inside an inlined copy
+/// is not credited. The gap 0019 records; this pins its shape so that a
+/// lookup that picked one of the two by accident shows.
+#[test]
+fn a_shared_root_is_not_credited() {
+    let (_tmp, coverage) = coverage_dir();
+    let source = fixture("shared_root");
+    record_runs(&coverage, &assemble_program(&source), &[&[]]);
+    let report = default_report(&coverage);
+    let file = only_file(&report, &source);
+    assert_functions(
+        &functions(file),
+        &[("leaf", 1, 1), ("wrapper", 5, 0), ("outer", 9, 1), ("$main", 13, 1)],
+    );
+}
+
+/// An inlined copy that begins in the middle of a block, after an `assert`:
+/// the copy is entered once per execution of its first operation, not once
+/// per start of the block, which the failing run would count.
+#[test]
+fn an_inlined_copy_after_a_failing_assert() {
+    let (_tmp, coverage) = coverage_dir();
+    let source = fixture("assert_then_exec");
+    let package = assemble_program(&source);
+    record_run(&coverage, &package, DefaultHost::default(), "pass", &[1]).unwrap();
+    record_run(&coverage, &package, DefaultHost::default(), "fail", &[0]).unwrap_err();
+    let report = default_report(&coverage);
+    let file = only_file(&report, &source);
+    // The `exec` rows have no operations and are not coverable; `twice` is
+    // credited on its definition line.
+    assert_eq!(lines_in(file, 1..=6), BTreeMap::from([(1, 2), (2, 2), (5, 1)]));
+    assert_functions(&functions(file), &[("leaf", 1, 2), ("twice", 5, 1), ("$main", 10, 2)]);
 }
 /// Procedures calling each other three levels deep, each with an `if`, so
 /// every copy is a tree of its own: main calls a once, a calls b twice, b
