@@ -1,6 +1,6 @@
 # 0018: Collect coverage through the debugger engine
 
-Status: accepted (2026-10-20). Supersedes 0002 and 0004; narrows 0005.
+Status: accepted (2026-10-20). Supersedes 0002 and 0004, the observer sentence of 0003, the VM-pin consequence of 0011, and the forest-return mechanism of 0017; narrows 0005.
 Lands when the engine release that carries the per-cycle hook is published;
 until then the branch builds against the engine's branch.
 
@@ -75,8 +75,15 @@ the VM's program-executor trait, with the host the suite supplies.
   standard error; the supplied debug info is deep-copied on the first step
   of a context built from a bare program.
 - With the coverage directory variable unset, the program executor runs the
-  plain processor: an enabled feature costs nothing until coverage is asked
-  for (0011 holds). The run is named after the thread that starts the
+  processor's own program executor, with the debug info and the entry point
+  it was given: an enabled feature costs nothing until coverage is asked for
+  (0011 holds).
+- Moving to the VM release the engine pins loses the coverage below the entry
+  of a dynamically linked library whose entry procedure compiles to the same
+  MAST as another procedure of the library, such as a wrapper made of one
+  `exec`: the processor cannot pick the source root of the entry and tracks no
+  source nodes for that invocation. A VM gap, to be raised upstream; the
+  reporter test that shows it is ignored until then. The run is named after the thread that starts the
   execution, which under the standard test runner is the test; a runtime
   that starts executions from worker threads loses that attribution.
 - The engine's debug executor gained a field, which breaks construction by

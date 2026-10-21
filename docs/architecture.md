@@ -36,9 +36,10 @@ processes or machines merge by landing in the same directory.
 
 - **collector**: counts the per-cycle records the debugger engine produces
   and writes a run file. It also provides the program-executor implementation
-  that test suites plug into the protocol's transaction executor; that
-  executor drives the engine's host-agnostic stepper with the host the test
-  suite supplies. The engine is the only reader of the VM's continuation
+  that test suites plug into the protocol's transaction executor; when a
+  coverage directory is configured, that executor drives the engine's
+  host-agnostic stepper with the host the test suite supplies, and otherwise
+  hands the program to the processor's own executor. The engine is the only reader of the VM's continuation
   stream: the collector never interprets continuations itself.
 - **cov**: reads a coverage directory, merges runs, resolves source files,
   computes line, function, and branch coverage, and writes the output formats.
@@ -74,10 +75,11 @@ between the first two.
   require the source text.
 - **Hit**: one observed execution of a row or a start of a source node.
 - **Edge start**: a start of a source node recorded together with the node
-  that started it. A procedure entered by `call`, dynamically, or from
-  another package has one source tree however many places call it, so an
-  `if` arm that is a bare call shares its node with every other call of that
-  procedure; only the edge tells the arm's own count.
+  that started it. A procedure entered dynamically or from another package
+  has one source tree however many places call it, and one entered by `call`
+  has one tree per inlined copy of its caller, so an `if` arm that is a bare
+  call shares its node with other calls of that procedure; only the edge
+  tells the arm's own count.
 - **Run**: one VM execution from entry to termination, recorded as one file.
 - **Coverable**: a row that counts in the denominator. In a MASM package every
   row is coverable. Filtering is a Rust-source concern, planned with Rust
@@ -112,9 +114,8 @@ This is the specification the collector and reporter implement together.
    never start the function's own root node, and skips rows of procedures
    inlined into the body. A function with no coverable row of its own
    counts the starts of its root, the entries of its inlined copies, found
-   where a copy's inline call begins, and the starts of the copies a `call`
-   inside an inlined copy makes, when the copied root belongs to that
-   function alone. Its definition line is credited with that count, because
+   where a copy's inline call begins, and the edges into the tree a `call`
+   node calls, when that tree's root belongs to that function alone. Its definition line is credited with that count, because
    LCOV consumers reject a function record without a line record.
 7. Hits are counts. Any consumer that wants booleans truncates at output time.
 
@@ -177,9 +178,9 @@ the protocol's transaction executor at the collector's program executor, which
 runs the program through the engine's stepper with the suite's own host. The
 collector steps and writes only when the coverage directory environment
 variable is set; with the feature on and the variable unset, the program runs
-through the plain processor and nothing changes. Each VM run, which under the usual test runner means each
-test, writes its own run file named after the test; no global state is shared
-between tests. Coverage never changes a test's outcome: a run file that cannot
+through the processor's own executor and nothing changes. Each VM run, which
+under the usual test runner means each test, writes its own run file named
+after the test; no global state is shared between tests. Coverage never changes a test's outcome: a run file that cannot
 be written is reported and the execution's outputs are returned as usual.
 
 ## Version policy

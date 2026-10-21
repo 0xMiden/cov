@@ -10,9 +10,10 @@
 //! The debugger engine resolves every VM cycle to source and hands the
 //! collector one record per cycle. Any loop that steps the engine can feed a
 //! [`Collector`]: the `miden-cov run` command drives the engine's stepper
-//! with the host the engine builds, and [`CoverageExecutor`] drives it from
-//! inside an executor generic over the VM's program executor, such as the
-//! protocol's transaction executor, with that executor's host.
+//! with the host the engine builds, and [`CoverageExecutor`] drives it, when
+//! a coverage directory is configured, from inside an executor generic over
+//! the VM's program executor, such as the protocol's transaction executor,
+//! with that executor's host.
 
 #![no_std]
 
@@ -31,6 +32,6 @@ pub use collector::{Collector, CollectorOutput};
 pub use executor::CoverageExecutor;
 pub use format::{PackageFile, RunFile, RunOutcome};
 pub use hits::PackageHits;
-/// The engine types a driver of the collector needs, so it need not depend on
-/// the engine at a matching version itself.
-pub use miden_debug_engine::{CycleInfo, Stepper};
+/// The engine types a driver of the collector names: the stepper and the
+/// record. The VM types a driver also needs come from `miden-processor`.
+pub use miden_debug_engine::{CycleInfo, NodeStart, Stepper};

@@ -50,8 +50,12 @@ format-check: ## Runs Format using nightly toolchain but only in check mode
 shear: ## Runs cargo-shear to find unused or misplaced dependencies
 	cargo shear
 
+.PHONY: check-no-std
+check-no-std: ## Checks that the collector builds without its std feature, warnings denied
+	RUSTFLAGS="-D warnings" cargo check -p miden-cov-collector --no-default-features
+
 .PHONY: lint
-lint: format-check clippy shear ## Runs all lint checks without modifying files
+lint: format-check clippy shear check-no-std ## Runs all lint checks without modifying files
 
 # --- docs ----------------------------------------------------------------------------------------
 

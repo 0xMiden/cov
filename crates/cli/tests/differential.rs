@@ -65,9 +65,9 @@ use std::{
 use miden_assembly::{Assembler, Linkage};
 use miden_core_lib::CoreLibrary;
 use miden_cov::Snapshot;
-use miden_cov_collector::{Collector, RunOutcome, dir::CoverageDir};
+use miden_cov_collector::{Collector, RunOutcome, Stepper, dir::CoverageDir};
 use miden_debug_engine::{
-    ExecutionConfig, Executor, Stepper,
+    ExecutionConfig, Executor,
     debug_types::{DefaultSourceManager, Location},
     processor::{
         DefaultHost, ExecutionOptions, FastProcessor, Felt, HostLibrary, StackInputs,

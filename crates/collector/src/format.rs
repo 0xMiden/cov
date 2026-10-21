@@ -107,7 +107,8 @@ pub struct RunFile {
     pub name: String,
     /// How the run ended.
     pub outcome: RunOutcome,
-    /// Number of clock cycles observed.
+    /// Number of cycles the run attempted: the VM clock when the program
+    /// ended, plus one when its last cycle failed.
     pub cycles: u64,
     /// Hits per package, keyed by the package's forest commitment.
     pub packages: Vec<(Word, PackageHits)>,

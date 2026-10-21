@@ -8,7 +8,7 @@ old one is marked superseded and links forward. Never delete a record.
 |---|----------|--------|
 | [0001](0001-observe-the-vm-not-instrument-the-source.md) | Collect coverage by observing the VM, not by instrumenting the source | accepted |
 | [0002](0002-step-api-until-tracer-is-exported.md) | Observe through the processor's step API until the tracer trait is exported | superseded by 0018 |
-| [0003](0003-cli-uses-the-debugger-engine.md) | The CLI uses the debugger engine for loading, linking, and inputs | accepted |
+| [0003](0003-cli-uses-the-debugger-engine.md) | The CLI uses the debugger engine for loading, linking, and inputs | accepted, observer sentence superseded by 0018 |
 | [0004](0004-collector-stays-engine-free.md) | The collector crate never depends on the debugger engine | superseded by 0018 |
 | [0005](0005-vm-version-policy.md) | Published releases only; the workspace follows the debugger's VM pin | accepted, collector-ahead clause superseded by 0018 |
 | [0006](0006-coverage-unit-and-coverable-rule.md) | Rows and source nodes are the unit; hit counts, not booleans | accepted |
@@ -16,7 +16,7 @@ old one is marked superseded and links forward. Never delete a record.
 | [0008](0008-coverage-directory.md) | Two-stage workflow through a self-contained coverage directory | accepted |
 | [0009](0009-input-is-a-package-with-debug-info.md) | Input is a package that kept its debug info; no coverage build | accepted |
 | [0010](0010-lcov-primary-output.md) | LCOV is the primary output; octocov for PR comments | accepted |
-| [0011](0011-test-suite-activation.md) | Test suites activate coverage through a feature plus an environment variable | accepted |
+| [0011](0011-test-suite-activation.md) | Test suites activate coverage through a feature plus an environment variable | accepted, VM-pin consequence superseded by 0018 |
 | [0012](0012-repository-organization.md) | Crates under `crates/`; VM-style Makefile, CI, and release; compiler-style Cargo conventions | accepted, release part superseded by 0015 |
 | [0013](0013-documentation-policy.md) | Map, records, roadmap; the code is the source of truth | accepted |
 | [0014](0014-agent-facing-output.md) | Agent feedback is a JSON of uncovered regions with per-test attribution | accepted |

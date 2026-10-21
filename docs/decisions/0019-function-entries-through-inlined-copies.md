@@ -8,8 +8,9 @@ The VM release the engine moved to changes the shape of the debug info. The
 assembler now emits a copy of a procedure's source tree at every place the
 procedure is inlined, and marks every row of a copy with an inline call
 naming the procedure and the call site. The procedure's own tree, the one its
-function record points at, never executes; the copies do. Before, an inlined
-procedure had one tree and its root started once per call.
+function record points at, executes only through a `call`; the copies do
+the rest. Before, an inlined procedure had one tree and its root started once
+per call.
 
 Most of the reporter did not notice: rows are aggregated by location (0016),
 and copies of a row share one location. What broke is the function count of
@@ -27,22 +28,26 @@ first operation of the call's range; on a control node, which has no
 operations, once per start of the node.
 
 A `call` inside such a copy clones the callee's tree too, without an inline
-call naming the callee: the clone's root is the `call` node's child, and it
-is entered once per start of that child. It is credited to the one function
-whose MAST root it is. A root shared by several functions is skipped: two
-procedures whose bodies compile to the same MAST, such as a procedure made
-of one `exec` of another, cannot be told apart by their roots, and such a
-procedure reached only by a `call` inside an inlined copy reports zero. The
-assembler should mark cloned call targets like inlined copies, which would
-close that gap; that is raised upstream.
+call naming the callee: the clone's root is the `call` node's child, shared
+by every `call` of the callee within the copy, and each `call` node enters it
+once per edge from the node to the child. It is credited to the one function
+whose MAST root it is; the rule applies to every `call` node, including a
+`call` into a dynamically linked package, whose target is also a child of
+the node. A root shared by several functions is skipped: two procedures
+whose bodies compile to the same MAST, such as a procedure made of one
+`exec` of another, cannot be told apart by their roots, and the entries of
+such a procedure through a `call` inside an inlined copy are not counted.
+The assembler should mark cloned call targets like inlined copies, which
+would close that gap; to be raised upstream.
 
 The primary rule stays: a function with a coverable row of its own counts
 the hits of its first such row, which also sees bodies entered from another
 package, whose starts the collector never observes.
 
 Edges (0017) stay. Inlined arms now have their own nodes, but an arm that is
-a `call`, a dynamic call, or a procedure of another package still shares its
-node with every other call of it.
+a `call` shares its node with the other `call`s of the same copy, and an arm
+that is a dynamic call or a procedure of another package shares it with every
+other call of it.
 
 ## Alternatives
 

@@ -22,7 +22,8 @@ use crate::{
 pub struct Collector {
     /// The forests seen so far, keyed by the address of their allocation.
     forests: BTreeMap<usize, ForestEntry>,
-    /// Number of records received.
+    /// Number of records received: one per attempted cycle, the failing one
+    /// included.
     cycles: u64,
 }
 
@@ -54,7 +55,8 @@ impl Collector {
         Self::default()
     }
 
-    /// Number of cycles recorded so far.
+    /// Number of cycles recorded so far; a cycle that fails is recorded
+    /// before it runs, so it counts.
     pub fn cycles(&self) -> u64 {
         self.cycles
     }

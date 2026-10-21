@@ -22,10 +22,11 @@ pub struct PackageHits {
     /// How many times each source node started as the child of a given
     /// parent, keyed by (parent source node id, child source node id).
     ///
-    /// Needed because a procedure entered by `call`, dynamically, or from
-    /// another package has one source tree however many places call it: an
-    /// `if` arm that is such a bare call shares its node with every other
-    /// call of that procedure, and only the edge tells the arms apart.
+    /// Needed because a procedure entered dynamically or from another
+    /// package has one source tree however many places call it, and one
+    /// entered by `call` has one tree per inlined copy of its caller: an
+    /// `if` arm that is such a bare call shares its node with other calls of
+    /// that procedure, and only the edge tells the arms apart.
     pub edge_starts: BTreeMap<(u32, u32), u64>,
 }
 
