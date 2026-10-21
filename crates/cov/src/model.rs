@@ -134,7 +134,8 @@ pub fn build_report(
             }
         }
 
-        for function in debug_info.functions() {
+        let inline_entries = package.inline_entries();
+        for (function_idx, function) in debug_info.functions().iter().enumerate() {
             let Some(stored_path) = debug_info
                 .get_file(function.file_idx)
                 .and_then(|file| debug_info.get_string(file.path_idx))
@@ -161,7 +162,8 @@ pub fn build_report(
             });
             let name = name.as_deref().unwrap_or("").to_owned();
             let tally = functions.entry((key, function.line.0 + 1, name)).or_default();
-            tally.root_starts += root.map_or(0, |root| package.starts(root));
+            tally.root_starts += root.map_or(0, |root| package.starts(root))
+                + inline_entries.get(&(function_idx as u32)).copied().unwrap_or(0);
             if let Some(entry) = entry {
                 tally.entry = Some(files.location_key(&entry));
             }
@@ -192,8 +194,9 @@ pub fn build_report(
         let Some(file) = reported.get_mut(&key) else {
             continue;
         };
-        // Without an entry location, fall back to the root's starts, which
-        // miss inlined copies and bodies entered from another package.
+        // Without an entry location, fall back to the starts of the root and
+        // of every inlined copy, which miss bodies entered from another
+        // package.
         let count = entry.map_or(root_starts, |entry| entries.get(&entry).copied().unwrap_or(0));
         // The definition line is coverable and hit on every entry. A
         // procedure whose body is one basic block has no row there, and LCOV
@@ -236,6 +239,51 @@ impl<'a> PackageView<'a> {
     /// arm's own starts.
     fn starts_from(&self, parent: u32, child: impl Into<u32>) -> u64 {
         self.hits.edge_starts.get(&(parent, child.into())).copied().unwrap_or(0)
+    }
+
+    /// How many times each function was entered through an inlined copy of
+    /// its body, keyed by function index.
+    ///
+    /// The assembler emits a copy of a procedure's source tree at every
+    /// `exec` of it and marks the copy's rows with an inline call naming the
+    /// procedure, so the procedure's own root never runs. A copy is entered
+    /// where its inline call begins: at a node whose parent does not carry
+    /// the same call, or in the middle of a block. On a block it counts once
+    /// per execution of the first operation of the call's range; on a
+    /// control node, which has no operations, once per start of the node.
+    fn inline_entries(&self) -> BTreeMap<u32, u64> {
+        let debug_info = &self.package.debug_info;
+        let nodes = debug_info.nodes();
+        let mut parent = vec![None; nodes.len()];
+        for (node_id, node) in nodes.iter().enumerate() {
+            for child in &node.children {
+                parent[u32::from(*child) as usize] = Some(node_id as u32);
+            }
+        }
+        let mut entries = BTreeMap::new();
+        for (node_id, node) in nodes.iter().enumerate() {
+            let is_block = matches!(self.exec(node), Some(MastNode::Block(_)));
+            let inherited: Vec<_> = parent[node_id]
+                .map(|parent| {
+                    debug_info
+                        .inline_calls_for_operation(parent.into(), 0)
+                        .map(|call| (call.callee_idx, call.loc_idx))
+                        .collect()
+                })
+                .unwrap_or_default();
+            for call in &node.inline_calls {
+                if call.op_idx == 0 && inherited.contains(&(call.callee_idx, call.loc_idx)) {
+                    continue;
+                }
+                let count = if is_block {
+                    self.hits.op_hits.get(&(node_id as u32, call.op_idx)).copied().unwrap_or(0)
+                } else {
+                    self.starts(node_id as u32)
+                };
+                *entries.entry(u32::from(call.callee_idx)).or_default() += count;
+            }
+        }
+        entries
     }
 
     /// The exec node behind a source node.
@@ -428,6 +476,7 @@ struct FunctionTally {
     /// The location whose entries count the function's runs, if any copy
     /// has one; it is the same for every copy.
     entry: Option<LocationKey>,
-    /// Starts of the function's root, summed over its copies.
+    /// Starts of the function's root and entries of its inlined copies,
+    /// summed over the packages that contain it.
     root_starts: u64,
 }

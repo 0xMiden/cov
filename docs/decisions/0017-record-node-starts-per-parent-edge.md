@@ -1,6 +1,6 @@
 # 0017: Record node starts per parent edge
 
-Status: accepted (2026-10-19). Refines 0007.
+Status: accepted (2026-10-19). Refines 0007; premise narrowed to non-inlined calls by [0019](0019-function-entries-through-inlined-copies.md).
 
 ## Context
 

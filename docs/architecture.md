@@ -60,8 +60,10 @@ between the first two.
   in the source.
 - **Source node**: a node of the debug-info tree that mirrors the exec nodes
   one source occurrence at a time. Two identical `if` blocks in different
-  procedures share one exec node but have two source nodes. The VM reports the
-  current source node while stepping, which is what makes attribution exact.
+  procedures share one exec node but have two source nodes, and a procedure
+  that is inlined has a copy of its tree at every call site, whose rows carry
+  the inline call that produced them. The VM reports the current source node
+  while stepping, which is what makes attribution exact.
 - **Row** (asm-op row): one entry of a source node's instruction table, one
   per MASM instruction as written. A row knows the index of the first VM
   operation it expanded to, how many operations it expanded to, its source
@@ -72,9 +74,10 @@ between the first two.
   require the source text.
 - **Hit**: one observed execution of a row or a start of a source node.
 - **Edge start**: a start of a source node recorded together with the node
-  that started it. A procedure has one source tree however many places
-  call it, so an `if` arm that is a bare `exec` shares its node with every
-  other call of that procedure; only the edge tells the arm's own count.
+  that started it. A procedure entered by `call`, dynamically, or from
+  another package has one source tree however many places call it, so an
+  `if` arm that is a bare call shares its node with every other call of that
+  procedure; only the edge tells the arm's own count.
 - **Run**: one VM execution from entry to termination, recorded as one file.
 - **Coverable**: a row that counts in the denominator. In a MASM package every
   row is coverable. Filtering is a Rust-source concern, planned with Rust
@@ -107,8 +110,11 @@ This is the specification the collector and reporter implement together.
    path is the function's own, stopping at the first conditional or loop.
    That counts inlined copies and bodies entered from another package, which
    never start the function's own root node, and skips rows of procedures
-   inlined into the body. Its definition line is credited with that count,
-   because LCOV consumers reject a function record without a line record.
+   inlined into the body. A function with no coverable row of its own
+   counts the starts of its root and the entries of its inlined copies,
+   found where a copy's inline call begins. Its definition line is credited
+   with that count, because LCOV consumers reject a function record without
+   a line record.
 7. Hits are counts. Any consumer that wants booleans truncates at output time.
 
 ## Branch semantics
