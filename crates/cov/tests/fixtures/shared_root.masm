@@ -1,9 +1,18 @@
-proc wrapper
-    exec.leaf
+proc one
+    push.1 drop
+end
+
+proc two
+    push.2 drop
 end
 
 proc leaf
-    push.1 drop
+    exec.one
+    exec.two
+end
+
+proc wrapper
+    exec.leaf
 end
 
 proc outer

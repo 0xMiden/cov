@@ -121,31 +121,27 @@ pub fn build_report(
         })
         .collect();
 
-    // A `call` names its callee by the digest of the child's root. The callee's
-    // own package is asked first; a `call` into a linked library names a
-    // procedure whose record lives there, so the other packages are asked
-    // when the caller has none. Across packages the same procedure is
-    // recorded many times (a library linked into two programs, a library's
-    // table imported into a program that `exec`s one of its procedures), so
-    // only records that disagree on the function's identity make a root
-    // ambiguous.
-    let local_roots: Vec<BTreeMap<Word, Option<u32>>> =
-        views.iter().map(|(_, package)| package.local_roots()).collect();
-    let mut shared_roots: BTreeMap<Word, Option<RootOwner>> = BTreeMap::new();
-    for ((commitment, package), local) in views.iter().zip(&local_roots) {
-        for (digest, function) in local {
-            let Some(function) = function else { continue };
-            let Some(key) = package.function_key(*function) else {
+    // A `call` names its callee by the digest of the child's root, and the
+    // same procedure is recorded in many packages of the directory: a library
+    // linked into two programs, a library's table imported into a program
+    // that `exec`s one of its procedures. Records that agree on the
+    // function's file as the report resolves it, its line, and its name are
+    // one function; a root that two different functions share, in one
+    // package or across packages, cannot be credited.
+    let mut owners: BTreeMap<Word, BTreeMap<FunctionKey, (Word, u32)>> = BTreeMap::new();
+    for (commitment, package) in &views {
+        for (idx, function) in package.package.debug_info.functions().iter().enumerate() {
+            if package.canonical[idx] != idx as u32 {
+                continue;
+            }
+            let Some(key) = package.function_key(idx as u32, &mut files) else {
                 continue;
             };
-            shared_roots
-                .entry(*digest)
-                .and_modify(|unique| {
-                    if unique.as_ref().is_some_and(|(_, other)| *other != key) {
-                        *unique = None;
-                    }
-                })
-                .or_insert(Some(((*commitment, *function), key)));
+            owners
+                .entry(function.mast_root)
+                .or_default()
+                .entry(key)
+                .or_insert((*commitment, idx as u32));
         }
     }
     // Entries into a function through the `call` nodes of any package, keyed
@@ -154,7 +150,7 @@ pub fn build_report(
     // Entries into a function through the inlined copies of its own package.
     let mut inline_entries: Vec<BTreeMap<u32, u64>> = Vec::with_capacity(views.len());
 
-    for ((commitment, package), local) in views.iter().zip(&local_roots) {
+    for (commitment, package) in &views {
         let debug_info = &package.package.debug_info;
 
         for (node_id, node) in debug_info.nodes().iter().enumerate() {
@@ -182,21 +178,24 @@ pub fn build_report(
 
         inline_entries.push(package.inline_entries());
         for (child, digest, edges) in package.call_edges() {
-            let callee = match local.get(&digest) {
-                Some(Some(callee)) => Some((*commitment, *callee)),
-                Some(None) => None,
-                None => shared_roots
-                    .get(&digest)
-                    .and_then(|unique| unique.as_ref())
-                    .map(|(callee, _)| *callee),
-            };
-            let Some((callee_package, callee)) = callee else {
+            let Some(callee) = owners.get(&digest) else { continue };
+            let [(key, owner)] = callee.iter().collect::<Vec<_>>()[..] else {
                 continue;
             };
+            // The caller's own record of the function, when it has one, so that
+            // its own root is recognized below; otherwise the first package's.
+            let (callee_package, callee) = package
+                .record_with(key, digest, &mut files)
+                .map_or(*owner, |idx| (*commitment, idx));
             // The function's own root, the child of a `call` outside any copy,
             // is counted by its starts.
             let own_root = callee_package == *commitment
                 && debug_info.functions()[callee as usize].source_node.into_option() == Some(child);
+            // Crediting another package's record relies on the collector never
+            // seeing the root start of a procedure entered through an external
+            // node: the processor runs that start inside the step that resolves
+            // the node. Were it described, the library's root starts and these
+            // edges would both count the entry.
             if !own_root {
                 *call_entries.entry((callee_package, callee)).or_default() += edges;
             }
@@ -288,13 +287,10 @@ pub fn build_report(
     }
 }
 
-/// The identity of a function across packages: its file as stored, its line,
-/// and its name, which is also the key the report tallies functions under.
-type FunctionKey = (Arc<str>, u32, Arc<str>);
-
-/// The one function a MAST root belongs to, as (package commitment, record
-/// index), with its identity.
-type RootOwner = ((Word, u32), FunctionKey);
+/// The identity of a function across packages: its file as the report
+/// resolves it, its line, and its name, the key the report tallies functions
+/// under.
+type FunctionKey = (Arc<str>, u32, String);
 
 /// One package's forest and debug info with its merged hits.
 struct PackageView<'a> {
@@ -308,6 +304,7 @@ struct PackageView<'a> {
 }
 
 impl<'a> PackageView<'a> {
+    /// Pairs a package with its hits and folds its duplicate records.
     fn new(package: &'a PackageFile, hits: &'a PackageHits) -> Self {
         let mut first = BTreeMap::new();
         let canonical = package
@@ -343,31 +340,27 @@ impl<'a> PackageView<'a> {
             .collect()
     }
 
-    /// The identity of the record `function`, if it names a file.
-    fn function_key(&self, function: u32) -> Option<FunctionKey> {
+    /// The identity of the record `function`, if it names a file: the key the
+    /// report tallies it under.
+    fn function_key(&self, function: u32, files: &mut Files) -> Option<FunctionKey> {
         let debug_info = &self.package.debug_info;
         let record = &debug_info.functions()[function as usize];
         let path = debug_info
             .get_file(record.file_idx)
             .and_then(|file| debug_info.get_string(file.path_idx))?;
         let name = debug_info.get_string(record.name_idx)?;
-        Some((path, record.line.0 + 1, name))
+        Some((files.key(&path), record.line.0 + 1, name.to_string()))
     }
 
-    /// The functions of the package by the digest of their MAST root; `None`
-    /// for a digest that several of them share, which cannot be credited.
-    fn local_roots(&self) -> BTreeMap<Word, Option<u32>> {
-        let mut roots: BTreeMap<Word, Option<u32>> = BTreeMap::new();
-        for (idx, function) in self.package.debug_info.functions().iter().enumerate() {
-            if self.canonical[idx] != idx as u32 {
-                continue;
-            }
-            roots
-                .entry(function.mast_root)
-                .and_modify(|unique| *unique = None)
-                .or_insert(Some(idx as u32));
-        }
-        roots
+    /// The canonical record of this package with the identity `key` and the
+    /// MAST root `digest`, if any.
+    fn record_with(&self, key: &FunctionKey, digest: Word, files: &mut Files) -> Option<u32> {
+        let debug_info = &self.package.debug_info;
+        (0..debug_info.functions().len() as u32).find(|idx| {
+            self.canonical[*idx as usize] == *idx
+                && debug_info.functions()[*idx as usize].mast_root == digest
+                && self.function_key(*idx, files).as_ref() == Some(key)
+        })
     }
 
     /// How many times source node `node` started.
@@ -453,8 +446,8 @@ impl<'a> PackageView<'a> {
     /// edges, not the child's starts, are what one `call` contributes. The
     /// child of a `call` into a linked library is that library's root,
     /// whose start the collector never sees. The caller credits the edges to
-    /// the one function whose MAST root the child is, in the calling package
-    /// or, when it has no record of it, in the others.
+    /// the one function whose MAST root the child is, in whichever package of
+    /// the directory records it.
     fn call_edges(&self) -> impl Iterator<Item = (DebugSourceNodeId, Word, u64)> + '_ {
         let debug_info = &self.package.debug_info;
         debug_info.nodes().iter().enumerate().filter_map(move |(node_id, node)| {

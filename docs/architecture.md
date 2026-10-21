@@ -35,10 +35,10 @@ processes or machines merge by landing in the same directory.
 - **collector**: counts the per-cycle records the debugger engine produces and
   writes a run file. It also provides the program-executor implementation that
   test suites plug into the protocol's transaction executor; when a coverage
-  directory is configured and the program's entry point can be attributed to
-  source, that executor drives the engine's host-agnostic stepper with the host
-  the test suite supplies, and otherwise hands the program to the processor's
-  own executor. The engine is
+  directory is configured, the program has debug info, and stepping can start
+  at the entry point asked for, that executor drives the engine's
+  host-agnostic stepper with the host the test suite supplies, and otherwise
+  hands the program to the processor's own executor. The engine is
   the only reader of the VM's continuation stream: the collector never
   interprets continuations itself.
 - **cov**: reads a coverage directory, merges runs, resolves source files,
@@ -109,16 +109,17 @@ This is the specification the collector and reporter implement together.
 6. A function is hit each time the first coverable location that belongs to it
    is hit: the first row in its body, in execution order, whose procedure path
    is the function's own, stopping at the first conditional or loop. That
-   counts inlined copies and bodies entered from another package, which never
-   start the function's own root node, and skips rows of procedures inlined
-   into the body. A function with no coverable row of its own counts the
+   counts inlined copies and bodies entered through an external node, whose
+   root start is never seen, and skips rows of procedures inlined into the
+   body. A function with no coverable row of its own counts the
    starts of its root, the entries of its inlined copies, found where a copy's
    inline call begins, and the edges into the tree a `call` node calls, when
-   that tree's root belongs to one function: the calling package's record of
-   it, or, when it has none, the one function the other packages of the run
-   agree on. This rests on the collector never seeing the root start of a
-   procedure entered from another package; if it did, the root's starts and
-   the edges would both count the entry. Its definition line is credited with
+   that tree's root belongs to one function across every package of the
+   directory, records agreeing on file, line, and name being one function.
+   This rests on the collector never seeing the root start of a procedure
+   entered through an external node, which the processor runs inside the
+   step that resolves the node; if it were seen, the root's starts and the
+   edges would both count the entry. Its definition line is credited with
    that count, because LCOV consumers reject a function record without a line
    record.
 7. Hits are counts. Any consumer that wants booleans truncates at output time.
@@ -191,11 +192,10 @@ execution's outputs are returned as usual.
 Miden dependencies are published releases. A change that needs an engine that
 is not released yet builds against a pinned commit of the engine's branch, with
 the decision record naming the branch, and does not merge until the release
-exists. The workspace
-tracks one VM release: the one the debugger engine pins, since every crate here
-builds on the engine. If the protocol moves to a VM release the debugger does
-not yet support, coverage of the protocol's tests waits for the debugger to
-follow.
+exists. The workspace tracks one VM release: the one the debugger engine pins,
+since every crate here builds on the engine. If the protocol moves to a VM
+release the debugger does not yet support, coverage of the protocol's tests
+waits for the debugger to follow.
 
 ## Report scope
 

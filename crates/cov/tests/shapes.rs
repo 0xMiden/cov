@@ -369,8 +369,8 @@ fn dynamic_library_entry_sharing_a_body() {
 
 /// A procedure re-exported from another module of a library: the assembler
 /// records it twice, once per name, and both records must count as one.
-/// `only_execs` has no row of its own and is reached by a `call` inside an
-/// inlined copy, which is the case that needs the records folded.
+/// `only_execs` has no row of its own and is reached by a `call` from the
+/// entry's own tree, so an unfolded pair would double its root starts.
 #[test]
 fn reexported_procedures_count_once() {
     let (_tmp, coverage) = coverage_dir();
@@ -409,8 +409,9 @@ fn reexported_procedures_count_once() {
 
 /// Two procedures whose bodies compile to the same MAST cannot be told apart
 /// by their roots, so the one reached only by a `call` inside an inlined copy
-/// is not credited. The gap 0019 records; this pins its shape so that a
-/// lookup that picked one of the two by accident shows.
+/// is not credited; `leaf` is credited through its own copy. The gap 0019
+/// records; this pins its shape so that a lookup that picked one of the two
+/// by accident shows.
 #[test]
 fn a_shared_root_is_not_credited() {
     let (_tmp, coverage) = coverage_dir();
@@ -418,12 +419,18 @@ fn a_shared_root_is_not_credited() {
     record_runs(&coverage, &assemble_program(&source), &[&[]]);
     let report = default_report(&coverage);
     let file = only_file(&report, &source);
-    // `wrapper` comes first in the file, so a lookup that picked the first
-    // record of a shared root would credit it, and one that picked the last
-    // would credit `leaf` twice.
+    // Neither `leaf` nor `wrapper` has a row of its own, so a lookup that
+    // picked either record of the shared root would show in its count.
     assert_functions(
         &functions(file),
-        &[("wrapper", 1, 0), ("leaf", 5, 1), ("outer", 9, 1), ("$main", 13, 1)],
+        &[
+            ("one", 1, 1),
+            ("two", 5, 1),
+            ("leaf", 9, 1),
+            ("wrapper", 14, 0),
+            ("outer", 18, 1),
+            ("$main", 22, 1),
+        ],
     );
 }
 
@@ -450,7 +457,9 @@ fn two_programs_sharing_a_library() {
 /// A dynamically linked library both `exec`ed and `call`ed by the program: the
 /// `exec` imports the library's whole function table into the program, so
 /// the callee's root is recorded in both packages; the records agree, and
-/// the `call` is credited to the library.
+/// the `call` is credited through the program's own record. A second program
+/// in the same directory that only `call`s the procedure has no record of it
+/// and is credited through the library's.
 #[test]
 fn a_dynamic_library_both_executed_and_called() {
     let (_tmp, coverage) = coverage_dir();
@@ -473,7 +482,7 @@ fn a_dynamic_library_both_executed_and_called() {
             .assemble_program("program", source)
             .unwrap(),
     );
-    let host = DefaultHost::default().with_library(HostLibrary::from(package)).unwrap();
+    let host = DefaultHost::default().with_library(HostLibrary::from(package.clone())).unwrap();
     record_run(&coverage, &program, host, "dynamic", &[]).unwrap();
     let report = default_report(&coverage);
     let file = file(&report, &library);
@@ -484,6 +493,72 @@ fn a_dynamic_library_both_executed_and_called() {
             ("leaf2", 5, 1),
             ("only_execs", 9, 1),
             ("wrap", 14, 0),
+            ("other", 18, 1),
+        ],
+    );
+
+    let caller = Arc::from(
+        Assembler::new(Arc::new(DefaultSourceManager::default()))
+            .with_package(package.clone(), Linkage::Dynamic)
+            .unwrap()
+            .assemble_program("caller", fixture("call_lib2"))
+            .unwrap(),
+    );
+    let host = DefaultHost::default().with_library(HostLibrary::from(package)).unwrap();
+    record_run(&coverage, &caller, host, "call-only", &[]).unwrap();
+    let report = default_report(&coverage);
+    assert_functions(
+        &functions(common::file(&report, &library)),
+        &[
+            ("leaf1", 1, 2),
+            ("leaf2", 5, 2),
+            ("only_execs", 9, 2),
+            ("wrap", 14, 0),
+            ("other", 18, 1),
+        ],
+    );
+}
+
+/// A root that two procedures of a library share, seen from two programs: one
+/// links the library statically and runs the first procedure, the other links
+/// it dynamically, which imports every record, and `call`s the second. The
+/// root is ambiguous across the directory, so the `call` is not credited to
+/// either, and the first procedure keeps the count of its own run.
+#[test]
+fn a_root_shared_across_packages_is_not_credited() {
+    let (_tmp, coverage) = coverage_dir();
+    let library = fixture("amb");
+    let package = assemble_with_module(&fixture("amb_static"), "fixtures::amb", &library);
+    record_runs(&coverage, &package, &[&[]]);
+
+    let source_manager: Arc<dyn SourceManager> = Arc::new(DefaultSourceManager::default());
+    let dynamic: Arc<Package> = Arc::from(
+        Assembler::new(source_manager.clone())
+            .assemble_library(
+                "amb",
+                library_module(&source_manager, "fixtures::amb", &library),
+                Vec::<Box<miden_assembly::ast::Module>>::new(),
+            )
+            .unwrap(),
+    );
+    let program = Arc::from(
+        Assembler::new(source_manager)
+            .with_package(dynamic.clone(), Linkage::Dynamic)
+            .unwrap()
+            .assemble_program("program", fixture("amb_dynamic"))
+            .unwrap(),
+    );
+    let host = DefaultHost::default().with_library(HostLibrary::from(dynamic)).unwrap();
+    record_run(&coverage, &program, host, "dynamic", &[]).unwrap();
+    let report = default_report(&coverage);
+    let file = file(&report, &library);
+    assert_functions(
+        &functions(file),
+        &[
+            ("inner1", 1, 1),
+            ("inner2", 5, 1),
+            ("leaf", 9, 1),
+            ("wrapper", 14, 0),
             ("other", 18, 1),
         ],
     );
