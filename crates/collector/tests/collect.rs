@@ -14,7 +14,7 @@ use miden_cov_collector::{
     Collector, CoverageExecutor, PackageHits, RunOutcome, Stepper,
     dir::{COVERAGE_DIR_ENV, CoverageDir},
 };
-use miden_mast_package::{Package, debug_info::DebugSourceNodeId};
+use miden_mast_package::{Package, QualifiedProcedureName, debug_info::DebugSourceNodeId};
 use miden_processor::{
     DefaultHost, ExecutionError, ExecutionOptions, ExecutionOutput, FastProcessor, ProgramExecutor,
     StackInputs, advice::AdviceInputs,
@@ -270,10 +270,12 @@ fn run_in_child(name: &str, cwd: &std::path::Path, dir: Option<&std::path::Path>
     };
     let output = command.output().unwrap();
     let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
-        output.status.success() && stdout.contains("test result: ok. 1 passed"),
-        "{name} did not run once and pass:\n{stdout}\n{}",
-        String::from_utf8_lossy(&output.stderr)
+        output.status.success()
+            && stdout.contains("test result: ok. 1 passed")
+            && !stderr.contains("skipped:"),
+        "{name} did not run once and pass:\n{stdout}\n{stderr}"
     );
 }
 
@@ -360,7 +362,9 @@ fn coverage_executor_child_without_directory() {
 
 /// The body of the child process for a program whose outputs are not all
 /// zero, with the coverage directory set: the stepper's outputs are the
-/// processor's.
+/// processor's. Then the two cases that go to the processor's own executor
+/// with the directory set: no debug info, and an entry point with no unique
+/// source root; neither writes a run.
 #[test]
 #[ignore = "run by coverage_executor_writes_one_run_per_execution in a child process"]
 fn coverage_executor_child_outputs() {
@@ -384,6 +388,66 @@ fn coverage_executor_child_outputs() {
     assert_eq!(output.stack, expected.stack);
     assert_eq!(output.stack.get_element(0), Some(Felt::new(11).unwrap()));
     assert_eq!(output.precompile_witness.is_some(), expected.precompile_witness.is_some());
+
+    // No debug info: nothing to attribute to, so the processor's own executor
+    // runs and the stack is still the program's.
+    let executor = <CoverageExecutor as ProgramExecutor>::new(
+        StackInputs::default(),
+        AdviceInputs::default(),
+        ExecutionOptions::default(),
+    )
+    .unwrap();
+    let output =
+        block_on(executor.execute(&sum.unwrap_program(), &mut DefaultHost::default())).unwrap();
+    assert_eq!(output.stack, expected.stack);
+
+    // An entry point whose source root is ambiguous: a library procedure made
+    // executable whose body is one `exec` compiles to the same MAST as its
+    // callee, so the entry's exec node has two source roots. The processor's
+    // own executor refuses it before any cycle, and so does the coverage
+    // executor, with the same error.
+    let library = Assembler::default()
+        .assemble_library(
+            "amb",
+            "namespace amb::m pub proc leaf push.1 drop end pub proc middle exec.leaf end pub \
+             proc entry exec.middle end",
+            None::<String>,
+        )
+        .unwrap();
+    let entrypoint: QualifiedProcedureName = "amb::m::entry".parse().unwrap();
+    let ambiguous = Arc::new(library.make_executable(&entrypoint).unwrap());
+    let debug_info = ambiguous.debug_info().unwrap().unwrap();
+    assert!(
+        debug_info
+            .unique_source_root_for_exec_node(ambiguous.unwrap_program().entrypoint())
+            .is_err(),
+        "the fixture's entry root is ambiguous"
+    );
+    let ours = <CoverageExecutor as ProgramExecutor>::new(
+        StackInputs::default(),
+        AdviceInputs::default(),
+        ExecutionOptions::default(),
+    )
+    .unwrap()
+    .with_debug_info(debug_info.clone());
+    let ours = block_on(ours.execute(&ambiguous.unwrap_program(), &mut DefaultHost::default()))
+        .unwrap_err()
+        .to_string();
+    let theirs = <FastProcessor as ProgramExecutor>::new(
+        StackInputs::default(),
+        AdviceInputs::default(),
+        ExecutionOptions::default(),
+    )
+    .unwrap()
+    .with_debug_info(debug_info);
+    let theirs = block_on(<FastProcessor as ProgramExecutor>::execute(
+        theirs,
+        &ambiguous.unwrap_program(),
+        &mut DefaultHost::default(),
+    ))
+    .unwrap_err()
+    .to_string();
+    assert_eq!(ours, theirs);
 }
 
 /// One run per execution with the directory set, none without it, and the

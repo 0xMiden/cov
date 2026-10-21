@@ -27,10 +27,11 @@ use crate::collector::Collector;
 /// standard error and the outputs are returned as usual.
 ///
 /// The step API cannot start from a given entry-point source node; it starts
-/// from the unique source root of the entry point. When an entry-point node
-/// is supplied with debug info and that root is not the same node, the
-/// program runs through the processor's own executor without collecting, and
-/// says so on standard error.
+/// from the unique source root of the entry point. When an entry-point node is
+/// supplied and that root is not the same node, or when none is supplied and
+/// the entry point has no unique root, the program runs through the
+/// processor's own executor without collecting, and says so on standard
+/// error.
 pub struct CoverageExecutor {
     /// The processor configured with the inputs and the options.
     processor: FastProcessor,
@@ -75,7 +76,7 @@ impl ProgramExecutor for CoverageExecutor {
         // after whichever thread polls the future to its end.
         let run = coverage_run();
         async move {
-            let Self { processor, debug_info, entrypoint } = self;
+            let Self { mut processor, debug_info, entrypoint } = self;
             match (run, debug_info) {
                 // Stepping needs debug info to attribute anything to; a program
                 // without any is run as if coverage were off.
@@ -87,7 +88,6 @@ impl ProgramExecutor for CoverageExecutor {
                         // A context that cannot be built is an execution that
                         // failed before its first cycle; it is written like any
                         // other.
-                        let mut processor = processor;
                         let ctx = processor.get_initial_resume_context(program)?;
                         let mut stepper =
                             Stepper::new(processor, ctx).with_debug_info(Arc::new(debug_info));
@@ -104,7 +104,6 @@ impl ProgramExecutor for CoverageExecutor {
                     // The processor's own executor. Its inherent `execute`
                     // shadows the trait's, and only the trait's reads the debug
                     // info and the entry point it was given.
-                    let mut processor = processor;
                     if let Some(debug_info) = debug_info {
                         processor = processor.with_debug_info(debug_info);
                     }
@@ -117,9 +116,9 @@ impl ProgramExecutor for CoverageExecutor {
 }
 
 /// Whether stepping from the program's unique source root starts where the
-/// caller asked: at the named entry point, or at whatever the processor's own
-/// executor would start at when none was named, which also fails on an
-/// ambiguous root, before any cycle, the way that executor does.
+/// caller asked: at the named entry point, or, when none was named, where the
+/// processor's own executor would start. That executor fails on an ambiguous
+/// root before any cycle, and so must this one, through that executor.
 ///
 /// Says on standard error when it does not, since the execution then runs
 /// without coverage.
@@ -137,10 +136,16 @@ fn startable_by_stepping(
         return true;
     }
     #[cfg(feature = "std")]
-    std::eprintln!(
-        "miden-cov: the entry-point source node cannot be reached by stepping; running without \
-         coverage"
-    );
+    match entrypoint {
+        Some(_) => std::eprintln!(
+            "miden-cov: the entry-point source node cannot be reached by stepping; running \
+             without coverage"
+        ),
+        None => std::eprintln!(
+            "miden-cov: the entry point has no unique source root; running without coverage, \
+             which fails the same way"
+        ),
+    }
     false
 }
 
