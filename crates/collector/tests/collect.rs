@@ -3,6 +3,7 @@
 
 use std::{
     pin::pin,
+    process::Command,
     sync::Arc,
     task::{Context, Poll, Waker},
 };
@@ -10,11 +11,10 @@ use std::{
 use miden_assembly::Assembler;
 use miden_core::{Felt, mast::MastNode};
 use miden_cov_collector::{
-    Collector, CoverageExecutor, PackageHits, RunOutcome,
+    Collector, CoverageExecutor, PackageHits, RunOutcome, Stepper,
     dir::{COVERAGE_DIR_ENV, CoverageDir},
 };
-use miden_debug_engine::Stepper;
-use miden_mast_package::Package;
+use miden_mast_package::{Package, debug_info::DebugSourceNodeId};
 use miden_processor::{
     DefaultHost, ExecutionError, ExecutionOptions, ExecutionOutput, FastProcessor, ProgramExecutor,
     StackInputs, advice::AdviceInputs,
@@ -68,8 +68,8 @@ fn run(package: &Arc<Package>, flag: u64, n: u64) -> (PackageHits, u64) {
     (hits, output.run.cycles)
 }
 
-/// Finds the source node whose exec node is the only node of the given kind
-/// with the given number of children sources, by matching a predicate.
+/// The source nodes of the entry point's own tree whose exec node satisfies
+/// `pred`, in id order.
 fn source_node(package: &Package, pred: impl Fn(&MastNode) -> bool) -> Vec<u32> {
     let debug_info = package.debug_info().unwrap().unwrap();
     let forest = package.mast_forest();
@@ -198,8 +198,14 @@ fn block_on<F: Future>(future: F) -> F::Output {
 }
 
 /// Executes the fixture with `flag` and `n` through [`CoverageExecutor`], the
-/// way the protocol's transaction executor drives it.
-fn execute(package: &Package, flag: u64, n: u64) -> Result<ExecutionOutput, ExecutionError> {
+/// way the protocol's transaction executor drives it, starting at
+/// `entrypoint` when one is given.
+fn execute(
+    package: &Package,
+    flag: u64,
+    n: u64,
+    entrypoint: Option<DebugSourceNodeId>,
+) -> Result<ExecutionOutput, ExecutionError> {
     let stack = StackInputs::new(&[Felt::new(flag).unwrap(), Felt::new(n).unwrap()]).unwrap();
     let executor = <CoverageExecutor as ProgramExecutor>::new(
         stack,
@@ -207,51 +213,126 @@ fn execute(package: &Package, flag: u64, n: u64) -> Result<ExecutionOutput, Exec
         ExecutionOptions::default(),
     )
     .unwrap()
-    .with_debug_info(package.debug_info().unwrap().unwrap());
+    .with_debug_info(package.debug_info().unwrap().unwrap())
+    .with_entrypoint_source_node(entrypoint);
     block_on(executor.execute(&package.unwrap_program(), &mut DefaultHost::default()))
 }
 
-/// Points the coverage directory environment variable at `dir`.
-fn set_coverage_dir(dir: &std::path::Path) {
-    // SAFETY: the suite runs under nextest, one process per test, so the
-    // process-global variable is private to this test and no other thread
-    // reads the environment concurrently.
-    unsafe { std::env::set_var(COVERAGE_DIR_ENV, dir) };
+/// The outputs of the fixture from the processor alone.
+fn expected_output(package: &Package, flag: u64, n: u64) -> ExecutionOutput {
+    FastProcessor::new(
+        StackInputs::new(&[Felt::new(flag).unwrap(), Felt::new(n).unwrap()]).unwrap(),
+    )
+    .execute_sync(&package.unwrap_program(), &mut DefaultHost::default())
+    .unwrap()
+}
+
+/// Runs the ignored test `name` of this binary in a child process, with the
+/// coverage directory variable set to `dir` or removed.
+///
+/// The variable is process-global and reading it from another thread while it
+/// changes is undefined behavior, so it is only ever set for a child process.
+fn run_in_child(name: &str, dir: Option<&std::path::Path>) {
+    let mut command = Command::new(std::env::current_exe().unwrap());
+    command.args(["--exact", name, "--ignored", "--nocapture"]);
+    match dir {
+        Some(dir) => command.env(COVERAGE_DIR_ENV, dir),
+        None => command.env_remove(COVERAGE_DIR_ENV),
+    };
+    let output = command.output().unwrap();
+    assert!(
+        output.status.success(),
+        "{name} failed:\n{}\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+/// The body of the child process with the coverage directory set: one run
+/// per execution, whatever the outcome, and none when the entry point cannot
+/// be reached by stepping.
+#[test]
+#[ignore = "run by coverage_executor_writes_one_run_per_execution in a child process"]
+fn coverage_executor_child_with_directory() {
+    assert!(CoverageDir::from_env().is_some(), "the parent sets the directory");
+    let package = fixture();
+    let output = execute(&package, 1, 3, None).unwrap();
+    assert_eq!(output.stack, expected_output(&package, 1, 3).stack);
+    // A flag that is not binary fails the `if.true`.
+    execute(&package, 2, 3, None).unwrap_err();
+    // The entry point's unique source root is where stepping starts anyway.
+    let debug_info = package.debug_info().unwrap().unwrap();
+    let root = debug_info
+        .unique_source_root_for_exec_node(package.unwrap_program().entrypoint())
+        .unwrap()
+        .unwrap();
+    execute(&package, 1, 3, Some(root)).unwrap();
+    // Any other node cannot be reached by stepping: the program still runs,
+    // through the plain processor, and nothing is written.
+    let other = DebugSourceNodeId::from(if u32::from(root) == 0 { 1 } else { 0 });
+    let output = execute(&package, 1, 3, Some(other)).unwrap();
+    assert_eq!(output.stack, expected_output(&package, 1, 3).stack);
+}
+
+/// The body of the child process without the coverage directory: the program
+/// runs through the plain processor and the outputs are the processor's.
+#[test]
+#[ignore = "run by coverage_executor_writes_one_run_per_execution in a child process"]
+fn coverage_executor_child_without_directory() {
+    assert!(CoverageDir::from_env().is_none(), "the parent removes the directory");
+    let package = fixture();
+    let output = execute(&package, 1, 3, None).unwrap();
+    let expected = expected_output(&package, 1, 3);
+    assert_eq!(output.stack, expected.stack);
+    assert_eq!(output.precompile_witness.is_some(), expected.precompile_witness.is_some());
+    execute(&package, 2, 3, None).unwrap_err();
 }
 
 #[test]
-fn coverage_executor_runs_with_a_default_host() {
+fn coverage_executor_writes_one_run_per_execution() {
     let package = fixture();
-    let thread_name = std::thread::current().name().unwrap_or("unnamed").to_owned();
-
     let tmp = tempfile::tempdir().unwrap();
-    set_coverage_dir(tmp.path());
-    let output = execute(&package, 1, 3).unwrap();
-    let expected = FastProcessor::new(
-        StackInputs::new(&[Felt::new(1).unwrap(), Felt::new(3).unwrap()]).unwrap(),
-    )
-    .execute_sync(&package.unwrap_program(), &mut DefaultHost::default())
-    .unwrap();
-    assert_eq!(output.stack, expected.stack);
+    run_in_child("coverage_executor_child_with_directory", Some(tmp.path()));
 
     let dir = CoverageDir::new(tmp.path());
     let runs = dir.read_runs().unwrap();
-    assert_eq!(runs.len(), 1);
-    assert_eq!(runs[0].name, thread_name);
-    assert_eq!(runs[0].outcome, RunOutcome::Ok);
-    assert_eq!(runs[0].packages.len(), 1);
-    let (commitment, hits) = &runs[0].packages[0];
-    assert_eq!(*commitment, package.mast_forest_commitment());
-    assert!(!hits.is_empty());
+    assert_eq!(runs.len(), 3, "{runs:?}");
+    assert!(runs.iter().all(|run| run.name == "coverage_executor_child_with_directory"));
+    let failed: Vec<_> =
+        runs.iter().filter(|run| matches!(run.outcome, RunOutcome::Failed(_))).collect();
+    assert_eq!(failed.len(), 1);
+    assert_eq!(failed[0].packages.len(), 1);
+    // The two successful runs hold exactly what the package entry collects.
+    let (expected_hits, expected_cycles) = run(&package, 1, 3);
+    for run in runs.iter().filter(|run| run.outcome == RunOutcome::Ok) {
+        assert_eq!(run.cycles, expected_cycles);
+        assert_eq!(run.packages.len(), 1);
+        assert_eq!(run.packages[0].0, package.mast_forest_commitment());
+        assert_eq!(run.packages[0].1, expected_hits);
+    }
     let packages = dir.read_packages().unwrap();
     assert_eq!(packages.len(), 1);
     assert_eq!(packages[0].commitment, package.mast_forest_commitment());
 
-    // A flag that is not binary fails the `if.true`; the run is still written.
-    let tmp = tempfile::tempdir().unwrap();
-    set_coverage_dir(tmp.path());
-    execute(&package, 2, 3).unwrap_err();
-    let runs = CoverageDir::new(tmp.path()).read_runs().unwrap();
-    assert_eq!(runs.len(), 1);
-    assert!(matches!(runs[0].outcome, RunOutcome::Failed(_)), "{:?}", runs[0].outcome);
+    let empty = tempfile::tempdir().unwrap();
+    run_in_child("coverage_executor_child_without_directory", None);
+    assert_eq!(std::fs::read_dir(empty.path()).unwrap().count(), 0);
+}
+
+/// The collector counts one record per VM cycle: the finalization step after
+/// the last cycle adds none.
+#[test]
+fn cycles_match_the_vm_clock() {
+    let package = fixture();
+    let processor = FastProcessor::new(
+        StackInputs::new(&[Felt::new(1).unwrap(), Felt::new(3).unwrap()]).unwrap(),
+    );
+    let mut stepper = Stepper::for_package(processor, package.clone()).unwrap();
+    let mut collector = Collector::new();
+    stepper
+        .run_sync(&mut DefaultHost::default(), |cycle| collector.on_cycle(cycle))
+        .unwrap();
+    let clock = u64::from(u32::from(stepper.processor().state().clock()));
+    assert_eq!(collector.cycles(), clock);
+    assert_eq!(collector.finish("clock".into(), RunOutcome::Ok).run.cycles, clock);
 }

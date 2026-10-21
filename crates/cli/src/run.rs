@@ -103,13 +103,9 @@ pub fn run(args: RunArgs) -> anyhow::Result<()> {
     // The engine describes each cycle to the collector before executing it.
     let mut collector = Collector::new();
     let result = stepper.run_sync(&mut host, |cycle| collector.on_cycle(cycle));
-    let outcome = match &result {
-        Ok(()) => RunOutcome::Ok,
-        Err(error) => RunOutcome::Failed(error.to_string()),
-    };
 
     let name = args.name.unwrap_or_else(|| default_run_name(&args.package));
-    let output = collector.finish(name, outcome);
+    let output = collector.finish(name, RunOutcome::of(&result));
     let cov_dir = args.cov_dir.map_or_else(CoverageDir::from_env_or_default, CoverageDir::new);
     let path = cov_dir
         .write_output(&output)
