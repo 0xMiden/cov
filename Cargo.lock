@@ -1909,7 +1909,6 @@ dependencies = [
  "miden-core",
  "miden-core-lib",
  "miden-cov-collector",
- "miden-debug-engine",
  "miden-debug-types",
  "miden-mast-package",
  "miden-processor",
@@ -2000,7 +1999,7 @@ dependencies = [
 [[package]]
 name = "miden-debug-engine"
 version = "0.19.0"
-source = "git+https://github.com/0xMiden/miden-debug?branch=cov-use-debug#0255d0d861016818e47cf02189cb93a1302c91c9"
+source = "git+https://github.com/0xMiden/miden-debug?branch=cov-use-debug#fe897255e1b60bfe5fc2bdeeec30218a17628329"
 dependencies = [
  "clap",
  "hashbrown 0.17.1",

@@ -28,6 +28,5 @@ thiserror = { workspace = true, features = ["std"] }
 [dev-dependencies]
 miden-assembly = { workspace = true, features = ["std"] }
 miden-core-lib = { workspace = true, features = ["std"] }
-miden-debug-engine.workspace = true
 miden-processor = { workspace = true, features = ["std"] }
 tempfile.workspace = true

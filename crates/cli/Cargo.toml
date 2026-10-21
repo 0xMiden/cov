@@ -22,7 +22,7 @@ anyhow.workspace = true
 clap = { workspace = true, features = ["env"] }
 miden-cov.workspace = true
 miden-cov-collector = { workspace = true, features = ["std"] }
-miden-debug-engine.workspace = true
+miden-debug-engine = { workspace = true, features = ["std"] }
 miden-mast-package = { workspace = true, features = ["std"] }
 serde_json = { workspace = true, features = ["std"] }
 

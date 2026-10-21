@@ -89,6 +89,16 @@ pub enum RunOutcome {
     Failed(String),
 }
 
+impl RunOutcome {
+    /// The outcome of an execution that ended with `result`.
+    pub fn of<E: core::fmt::Display>(result: &Result<(), E>) -> Self {
+        match result {
+            Ok(()) => Self::Ok,
+            Err(error) => Self::Failed(alloc::format!("{error}")),
+        }
+    }
+}
+
 /// The hits of one VM execution, written when the execution ends.
 #[derive(Debug, Clone)]
 pub struct RunFile {

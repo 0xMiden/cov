@@ -31,3 +31,6 @@ pub use collector::{Collector, CollectorOutput};
 pub use executor::CoverageExecutor;
 pub use format::{PackageFile, RunFile, RunOutcome};
 pub use hits::PackageHits;
+/// The engine types a driver of the collector needs, so it need not depend on
+/// the engine at a matching version itself.
+pub use miden_debug_engine::{CycleInfo, Stepper};

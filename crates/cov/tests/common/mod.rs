@@ -16,8 +16,7 @@ use miden_cov::{
     BranchCoverage, FileCoverage, FunctionCoverage, Report, ReportFilter, Snapshot, SourceResolver,
     build_report,
 };
-use miden_cov_collector::{Collector, RunOutcome, dir::CoverageDir};
-use miden_debug_engine::Stepper;
+use miden_cov_collector::{Collector, RunOutcome, Stepper, dir::CoverageDir};
 use miden_mast_package::Package;
 use miden_processor::{DefaultHost, ExecutionError, FastProcessor, StackInputs};
 
@@ -47,11 +46,9 @@ pub fn record_run(
     let mut stepper = Stepper::for_package(processor, package.clone()).unwrap();
     let mut collector = Collector::new();
     let result = stepper.run_sync(&mut host, |cycle| collector.on_cycle(cycle));
-    let outcome = match &result {
-        Ok(()) => RunOutcome::Ok,
-        Err(error) => RunOutcome::Failed(error.to_string()),
-    };
-    coverage.write_output(&collector.finish(name.to_owned(), outcome)).unwrap();
+    coverage
+        .write_output(&collector.finish(name.to_owned(), RunOutcome::of(&result)))
+        .unwrap();
     result
 }
 

@@ -20,7 +20,6 @@ doctest = false
 default = ["std"]
 std = [
     "miden-core/std",
-    "miden-debug-engine/std",
     "miden-mast-package/std",
     "miden-processor/std",
 ]
