@@ -8,15 +8,15 @@ The VM release the engine moved to changes the shape of the debug info. The
 assembler now emits a copy of a procedure's source tree at every place the
 procedure is inlined, and marks every row of a copy with an inline call
 naming the procedure and the call site. The procedure's own tree, the one its
-function record points at, executes only through a `call`; the copies do
-the rest. Before, an inlined procedure had one tree and its root started once
-per call.
+function record points at, executes through a `call`, as the entry point, or
+as a dynamic target; the copies do the rest. Before, an inlined procedure had
+one tree and its root started once per call.
 
 Most of the reporter did not notice: rows are aggregated by location (0016),
 and copies of a row share one location. What broke is the function count of
 a procedure that has no coverable row of its own, such as a body made only of
 `exec` instructions, which fell back to the starts of the function's root.
-That root is now never started.
+That root is not started by an `exec`.
 
 ## Decision
 
@@ -31,9 +31,10 @@ A `call` inside such a copy clones the callee's tree too, without an inline
 call naming the callee: the clone's root is the `call` node's child, shared
 by every `call` of the callee within the copy, and each `call` node enters it
 once per edge from the node to the child. It is credited to the one function
-whose MAST root it is; the rule applies to every `call` node, including a
-`call` into a dynamically linked package, whose target is also a child of
-the node. A root shared by several functions is skipped: two procedures
+whose MAST root it is, looked up across the packages of the run: a `call`
+into a linked library names a procedure whose record lives there and whose
+root start the collector never sees, so the edges are its only count. A root
+shared by several functions is skipped: two procedures
 whose bodies compile to the same MAST, such as a procedure made of one
 `exec` of another, cannot be told apart by their roots, and the entries of
 such a procedure through a `call` inside an inlined copy are not counted.
@@ -44,10 +45,15 @@ The primary rule stays: a function with a coverable row of its own counts
 the hits of its first such row, which also sees bodies entered from another
 package, whose starts the collector never observes.
 
-Edges (0017) stay. Inlined arms now have their own nodes, but an arm that is
-a `call` shares its node with the other `call`s of the same copy, and an arm
-that is a dynamic call or a procedure of another package shares it with every
-other call of it.
+Edges (0017) stay. Inlined arms have their own nodes, and so does every
+`call` node; what the `call`s of one procedure within one copy share is the
+clone, which is why their entries are edges. The assembler also records a
+re-exported procedure twice, differing only in the linkage name; the reporter
+folds the duplicates into the first record before it counts.
+
+The call rule rests on the collector never seeing the root start of a
+procedure entered from another package: if the engine ever described it, the
+library's root starts and the caller's edges would both count the entry.
 
 ## Alternatives
 
