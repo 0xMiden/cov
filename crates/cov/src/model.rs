@@ -121,22 +121,31 @@ pub fn build_report(
         })
         .collect();
 
-    // The assembler records a re-exported procedure twice, once per name,
-    // pointing at the same root: the first record stands for the group.
-    // Roots are looked up across packages, because a `call` into a linked
-    // library names a procedure whose record lives there.
-    let canonical: Vec<Vec<u32>> =
-        views.iter().map(|(_, package)| package.canonical_functions()).collect();
-    let mut roots: BTreeMap<Word, Option<(Word, u32)>> = BTreeMap::new();
-    for ((commitment, package), canonical) in views.iter().zip(&canonical) {
-        for (idx, function) in package.package.debug_info.functions().iter().enumerate() {
-            if canonical[idx] != idx as u32 {
+    // A `call` names its callee by the digest of the child's root. The callee's
+    // own package is asked first; a `call` into a linked library names a
+    // procedure whose record lives there, so the other packages are asked
+    // when the caller has none. Across packages the same procedure is
+    // recorded many times (a library linked into two programs, a library's
+    // table imported into a program that `exec`s one of its procedures), so
+    // only records that disagree on the function's identity make a root
+    // ambiguous.
+    let local_roots: Vec<BTreeMap<Word, Option<u32>>> =
+        views.iter().map(|(_, package)| package.local_roots()).collect();
+    let mut shared_roots: BTreeMap<Word, Option<RootOwner>> = BTreeMap::new();
+    for ((commitment, package), local) in views.iter().zip(&local_roots) {
+        for (digest, function) in local {
+            let Some(function) = function else { continue };
+            let Some(key) = package.function_key(*function) else {
                 continue;
-            }
-            roots
-                .entry(function.mast_root)
-                .and_modify(|unique| *unique = None)
-                .or_insert(Some((*commitment, idx as u32)));
+            };
+            shared_roots
+                .entry(*digest)
+                .and_modify(|unique| {
+                    if unique.as_ref().is_some_and(|(_, other)| *other != key) {
+                        *unique = None;
+                    }
+                })
+                .or_insert(Some(((*commitment, *function), key)));
         }
     }
     // Entries into a function through the `call` nodes of any package, keyed
@@ -145,7 +154,7 @@ pub fn build_report(
     // Entries into a function through the inlined copies of its own package.
     let mut inline_entries: Vec<BTreeMap<u32, u64>> = Vec::with_capacity(views.len());
 
-    for ((commitment, package), canonical) in views.iter().zip(&canonical) {
+    for ((commitment, package), local) in views.iter().zip(&local_roots) {
         let debug_info = &package.package.debug_info;
 
         for (node_id, node) in debug_info.nodes().iter().enumerate() {
@@ -171,28 +180,33 @@ pub fn build_report(
             }
         }
 
-        inline_entries.push(package.inline_entries(canonical));
+        inline_entries.push(package.inline_entries());
         for (child, digest, edges) in package.call_edges() {
-            let Some(Some((callee_package, callee))) = roots.get(&digest) else {
+            let callee = match local.get(&digest) {
+                Some(Some(callee)) => Some((*commitment, *callee)),
+                Some(None) => None,
+                None => shared_roots
+                    .get(&digest)
+                    .and_then(|unique| unique.as_ref())
+                    .map(|(callee, _)| *callee),
+            };
+            let Some((callee_package, callee)) = callee else {
                 continue;
             };
             // The function's own root, the child of a `call` outside any copy,
             // is counted by its starts.
-            let own_root = *callee_package == *commitment
-                && debug_info.functions()[*callee as usize].source_node.into_option()
-                    == Some(child);
+            let own_root = callee_package == *commitment
+                && debug_info.functions()[callee as usize].source_node.into_option() == Some(child);
             if !own_root {
-                *call_entries.entry((*callee_package, *callee)).or_default() += edges;
+                *call_entries.entry((callee_package, callee)).or_default() += edges;
             }
         }
     }
 
-    for (((commitment, package), canonical), inline_entries) in
-        views.iter().zip(&canonical).zip(&inline_entries)
-    {
+    for ((commitment, package), inline_entries) in views.iter().zip(&inline_entries) {
         let debug_info = &package.package.debug_info;
         for (function_idx, function) in debug_info.functions().iter().enumerate() {
-            if canonical[function_idx] != function_idx as u32 {
+            if package.canonical[function_idx] != function_idx as u32 {
                 continue;
             }
             let Some(stored_path) = debug_info
@@ -205,19 +219,7 @@ pub fn build_report(
             if !files.reported.contains_key(&key) {
                 continue;
             }
-            // Every name the group goes by: the source name and the linkage
-            // names of the record and of its re-exports.
-            let names: Vec<_> = debug_info
-                .functions()
-                .iter()
-                .enumerate()
-                .filter(|(idx, _)| canonical[*idx] == function_idx as u32)
-                .flat_map(|(_, record)| {
-                    [Some(record.name_idx), record.linkage_name_idx.into_option()]
-                })
-                .flatten()
-                .filter_map(|idx| debug_info.get_string(idx))
-                .collect();
+            let names = package.names(function_idx as u32);
             let is_own = |row: &DebugSourceAsmOp| {
                 debug_info
                     .get_string(row.context_name_idx)
@@ -267,8 +269,7 @@ pub fn build_report(
         // Without an entry location, fall back to the starts of the root, the
         // entries of every copy, and the edges of every `call` to it. That
         // misses a body of another package entered through `exec`, whose root
-        // start the collector never sees, and a kernel procedure entered
-        // through `syscall`.
+        // start the collector never sees.
         let count = entry.map_or(starts, |entry| entries.get(&entry).copied().unwrap_or(0));
         // The definition line is coverable and hit on every entry. A
         // procedure whose body is one basic block has no row there, and LCOV
@@ -287,15 +288,86 @@ pub fn build_report(
     }
 }
 
+/// The identity of a function across packages: its file as stored, its line,
+/// and its name, which is also the key the report tallies functions under.
+type FunctionKey = (Arc<str>, u32, Arc<str>);
+
+/// The one function a MAST root belongs to, as (package commitment, record
+/// index), with its identity.
+type RootOwner = ((Word, u32), FunctionKey);
+
 /// One package's forest and debug info with its merged hits.
 struct PackageView<'a> {
     package: &'a PackageFile,
     hits: &'a PackageHits,
+    /// For each function record, the index of the record that stands for it.
+    ///
+    /// The assembler records a re-exported procedure twice, differing only
+    /// in the linkage name; the first record stands for both.
+    canonical: Vec<u32>,
 }
 
 impl<'a> PackageView<'a> {
     fn new(package: &'a PackageFile, hits: &'a PackageHits) -> Self {
-        Self { package, hits }
+        let mut first = BTreeMap::new();
+        let canonical = package
+            .debug_info
+            .functions()
+            .iter()
+            .enumerate()
+            .map(|(idx, function)| {
+                let record = (
+                    function.mast_root,
+                    function.name_idx,
+                    function.file_idx,
+                    function.line,
+                    function.source_node.into_option(),
+                );
+                *first.entry(record).or_insert(idx as u32)
+            })
+            .collect();
+        Self { package, hits, canonical }
+    }
+
+    /// Every name the record `function` and its re-exports go by.
+    fn names(&self, function: u32) -> Vec<Arc<str>> {
+        let debug_info = &self.package.debug_info;
+        debug_info
+            .functions()
+            .iter()
+            .enumerate()
+            .filter(|(idx, _)| self.canonical[*idx] == function)
+            .flat_map(|(_, record)| [Some(record.name_idx), record.linkage_name_idx.into_option()])
+            .flatten()
+            .filter_map(|idx| debug_info.get_string(idx))
+            .collect()
+    }
+
+    /// The identity of the record `function`, if it names a file.
+    fn function_key(&self, function: u32) -> Option<FunctionKey> {
+        let debug_info = &self.package.debug_info;
+        let record = &debug_info.functions()[function as usize];
+        let path = debug_info
+            .get_file(record.file_idx)
+            .and_then(|file| debug_info.get_string(file.path_idx))?;
+        let name = debug_info.get_string(record.name_idx)?;
+        Some((path, record.line.0 + 1, name))
+    }
+
+    /// The functions of the package by the digest of their MAST root; `None`
+    /// for a digest that several of them share, which cannot be credited.
+    fn local_roots(&self) -> BTreeMap<Word, Option<u32>> {
+        let mut roots: BTreeMap<Word, Option<u32>> = BTreeMap::new();
+        for (idx, function) in self.package.debug_info.functions().iter().enumerate() {
+            if self.canonical[idx] != idx as u32 {
+                continue;
+            }
+            roots
+                .entry(function.mast_root)
+                .and_modify(|unique| *unique = None)
+                .or_insert(Some(idx as u32));
+        }
+        roots
     }
 
     /// How many times source node `node` started.
@@ -314,24 +386,6 @@ impl<'a> PackageView<'a> {
         self.hits.edge_starts.get(&(parent, child.into())).copied().unwrap_or(0)
     }
 
-    /// For each function record, the index of the record that stands for it:
-    /// its own, or the first record with the same root when the assembler
-    /// recorded a re-export of it, which shares everything but the linkage
-    /// name.
-    fn canonical_functions(&self) -> Vec<u32> {
-        let mut first: BTreeMap<(DebugSourceNodeId, Word), u32> = BTreeMap::new();
-        self.package
-            .debug_info
-            .functions()
-            .iter()
-            .enumerate()
-            .map(|(idx, function)| match function.source_node.into_option() {
-                Some(root) => *first.entry((root, function.mast_root)).or_insert(idx as u32),
-                None => idx as u32,
-            })
-            .collect()
-    }
-
     /// How many times each function was entered through an inlined copy of
     /// its body, keyed by the index of the record standing for the function.
     ///
@@ -343,7 +397,7 @@ impl<'a> PackageView<'a> {
     /// call, or in the middle of a block. On a block it counts once per
     /// execution of the first operation of the call's range; on a control
     /// node, which has no operations, once per start of the node.
-    fn inline_entries(&self, canonical: &[u32]) -> BTreeMap<u32, u64> {
+    fn inline_entries(&self) -> BTreeMap<u32, u64> {
         let debug_info = &self.package.debug_info;
         let nodes = debug_info.nodes();
         // A clone shared by several `call` nodes keeps the last of them as
@@ -379,7 +433,8 @@ impl<'a> PackageView<'a> {
                 } else {
                     self.starts(node_id as u32)
                 };
-                let callee = canonical
+                let callee = self
+                    .canonical
                     .get(u32::from(call.callee_idx) as usize)
                     .copied()
                     .unwrap_or(u32::from(call.callee_idx));
@@ -398,18 +453,17 @@ impl<'a> PackageView<'a> {
     /// edges, not the child's starts, are what one `call` contributes. The
     /// child of a `call` into a linked library is that library's root,
     /// whose start the collector never sees. The caller credits the edges to
-    /// the one function whose MAST root the child is, in whichever package.
+    /// the one function whose MAST root the child is, in the calling package
+    /// or, when it has no record of it, in the others.
     fn call_edges(&self) -> impl Iterator<Item = (DebugSourceNodeId, Word, u64)> + '_ {
         let debug_info = &self.package.debug_info;
         debug_info.nodes().iter().enumerate().filter_map(move |(node_id, node)| {
-            if !matches!(self.exec(node), Some(MastNode::Call(_))) {
-                return None;
-            }
-            let [child] = node.children.as_slice() else {
+            let (Some(MastNode::Call(_)), &[child]) = (self.exec(node), node.children.as_slice())
+            else {
                 return None;
             };
-            let callee = self.exec(debug_info.source_node(*child)?)?;
-            Some((*child, callee.digest(), self.starts_from(node_id as u32, *child)))
+            let callee = self.exec(debug_info.source_node(child)?)?;
+            Some((child, callee.digest(), self.starts_from(node_id as u32, child)))
         })
     }
 
@@ -602,7 +656,7 @@ struct FunctionTally {
     /// The location whose entries count the function's runs, if any copy
     /// has one; it is the same for every copy.
     entry: Option<LocationKey>,
-    /// Starts of the function's own root and entries of its copies, summed
-    /// over the packages that contain it.
+    /// Starts of the function's own root, entries of its inlined copies, and
+    /// edges of the `call`s to it, summed over the packages of the run.
     starts: u64,
 }

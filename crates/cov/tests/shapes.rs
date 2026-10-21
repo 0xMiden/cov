@@ -367,32 +367,36 @@ fn dynamic_library_entry_sharing_a_body() {
     assert_functions(&functions(file), &[("leaf", 1, 1), ("middle", 9, 1), ("entry", 13, 1)]);
 }
 
-/// A procedure re-exported from another module: the assembler records it
-/// twice, once per name, and both records must count as one. `only_execs`
-/// has no row of its own and is reached by a `call` inside an inlined copy,
-/// which is the case that needs the records folded.
+/// A procedure re-exported from another module of a library: the assembler
+/// records it twice, once per name, and both records must count as one.
+/// `only_execs` has no row of its own and is reached by a `call` inside an
+/// inlined copy, which is the case that needs the records folded.
 #[test]
 fn reexported_procedures_count_once() {
     let (_tmp, coverage) = coverage_dir();
     let inner = fixture("reexport_inner");
     let root = fixture("reexport_root");
-    let source = fixture("reexport_program");
     let source_manager: Arc<dyn SourceManager> = Arc::new(DefaultSourceManager::default());
-    let mut assembler = Assembler::new(source_manager.clone());
-    assembler
-        .compile_and_statically_link(library_module(
-            &source_manager,
-            "fixtures::reexport_inner",
-            &inner,
-        ))
-        .unwrap()
-        .compile_and_statically_link(library_module(
-            &source_manager,
-            "fixtures::reexport_root",
-            &root,
-        ))
+    let package = Assembler::new(source_manager.clone())
+        .assemble_library(
+            "reexport",
+            library_module(&source_manager, "fixtures::reexport_root", &root),
+            vec![library_module(&source_manager, "fixtures::reexport_inner", &inner)],
+        )
         .unwrap();
-    let package = Arc::from(assembler.assemble_program("program", source).unwrap());
+    let debug_info = package.debug_info().unwrap().unwrap();
+    let records = debug_info
+        .functions()
+        .iter()
+        .filter(|function| {
+            debug_info
+                .get_string(function.name_idx)
+                .is_some_and(|name| name.ends_with("::only_execs"))
+        })
+        .count();
+    assert_eq!(records, 2, "the re-export is recorded a second time");
+    let entrypoint: QualifiedProcedureName = "fixtures::reexport_root::entry".parse().unwrap();
+    let package = Arc::new(package.make_executable(&entrypoint).unwrap());
     record_runs(&coverage, &package, &[&[]]);
     let report = default_report(&coverage);
     let file = file(&report, &inner);
@@ -414,9 +418,74 @@ fn a_shared_root_is_not_credited() {
     record_runs(&coverage, &assemble_program(&source), &[&[]]);
     let report = default_report(&coverage);
     let file = only_file(&report, &source);
+    // `wrapper` comes first in the file, so a lookup that picked the first
+    // record of a shared root would credit it, and one that picked the last
+    // would credit `leaf` twice.
     assert_functions(
         &functions(file),
-        &[("leaf", 1, 1), ("wrapper", 5, 0), ("outer", 9, 1), ("$main", 13, 1)],
+        &[("wrapper", 1, 0), ("leaf", 5, 1), ("outer", 9, 1), ("$main", 13, 1)],
+    );
+}
+
+/// Two programs linking one library statically, in one coverage directory:
+/// the library's records appear in both packages and agree, so a `call` in
+/// each credits the callee, and the counts add up across the two runs. The
+/// unused `other` is not linked in.
+#[test]
+fn two_programs_sharing_a_library() {
+    let (_tmp, coverage) = coverage_dir();
+    let library = fixture("lib2");
+    for program in ["two_programs_a", "two_programs_b"] {
+        let package = assemble_with_module(&fixture(program), "fixtures::lib2", &library);
+        record_runs(&coverage, &package, &[&[]]);
+    }
+    let report = default_report(&coverage);
+    let file = file(&report, &library);
+    assert_functions(
+        &functions(file),
+        &[("leaf1", 1, 2), ("leaf2", 5, 2), ("only_execs", 9, 2), ("wrap", 14, 2)],
+    );
+}
+
+/// A dynamically linked library both `exec`ed and `call`ed by the program: the
+/// `exec` imports the library's whole function table into the program, so
+/// the callee's root is recorded in both packages; the records agree, and
+/// the `call` is credited to the library.
+#[test]
+fn a_dynamic_library_both_executed_and_called() {
+    let (_tmp, coverage) = coverage_dir();
+    let library = fixture("lib2");
+    let source = fixture("exec_and_call_lib2");
+    let source_manager: Arc<dyn SourceManager> = Arc::new(DefaultSourceManager::default());
+    let package: Arc<Package> = Arc::from(
+        Assembler::new(source_manager.clone())
+            .assemble_library(
+                "lib2",
+                library_module(&source_manager, "fixtures::lib2", &library),
+                Vec::<Box<miden_assembly::ast::Module>>::new(),
+            )
+            .unwrap(),
+    );
+    let program = Arc::from(
+        Assembler::new(source_manager)
+            .with_package(package.clone(), Linkage::Dynamic)
+            .unwrap()
+            .assemble_program("program", source)
+            .unwrap(),
+    );
+    let host = DefaultHost::default().with_library(HostLibrary::from(package)).unwrap();
+    record_run(&coverage, &program, host, "dynamic", &[]).unwrap();
+    let report = default_report(&coverage);
+    let file = file(&report, &library);
+    assert_functions(
+        &functions(file),
+        &[
+            ("leaf1", 1, 1),
+            ("leaf2", 5, 1),
+            ("only_execs", 9, 1),
+            ("wrap", 14, 0),
+            ("other", 18, 1),
+        ],
     );
 }
 

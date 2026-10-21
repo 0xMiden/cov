@@ -1,9 +1,9 @@
-proc leaf
-    push.1 drop
-end
-
 proc wrapper
     exec.leaf
+end
+
+proc leaf
+    push.1 drop
 end
 
 proc outer
