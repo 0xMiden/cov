@@ -73,13 +73,23 @@ fn run(package: &Arc<Package>, flag: u64, n: u64) -> (PackageHits, u64) {
 fn source_node(package: &Package, pred: impl Fn(&MastNode) -> bool) -> Vec<u32> {
     let debug_info = package.debug_info().unwrap().unwrap();
     let forest = package.mast_forest();
-    debug_info
-        .nodes()
-        .iter()
-        .enumerate()
-        .filter(|(_, node)| pred(&forest[node.exec_node]))
-        .map(|(i, _)| i as u32)
-        .collect()
+    // The assembler emits a source tree per procedure and one per call site;
+    // only the entry point's tree executes.
+    let root = debug_info
+        .unique_source_root_for_exec_node(package.unwrap_program().entrypoint())
+        .unwrap()
+        .unwrap();
+    let mut found = Vec::new();
+    let mut pending = vec![root];
+    while let Some(id) = pending.pop() {
+        let node = &debug_info[id];
+        pending.extend(node.children.iter().copied());
+        if pred(&forest[node.exec_node]) {
+            found.push(u32::from(id));
+        }
+    }
+    found.sort_unstable();
+    found
 }
 
 #[test]
