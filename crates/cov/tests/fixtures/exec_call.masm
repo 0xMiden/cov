@@ -9,6 +9,7 @@ end
 
 proc outer
     call.middle
+    call.middle
 end
 
 proc wrapped
@@ -20,4 +21,6 @@ begin
     exec.wrapped
     exec.wrapped
     call.wrapped
+    call.middle
+    call.middle
 end

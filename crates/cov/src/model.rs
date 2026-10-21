@@ -198,8 +198,9 @@ pub fn build_report(
             continue;
         };
         // Without an entry location, fall back to the starts of the root and
-        // the entries of every copy, which miss a body entered from another
-        // package through a `call`, whose root start the collector never sees.
+        // the entries of every copy. That misses a body of another package
+        // entered through `exec`, whose root start the collector never sees,
+        // and a kernel procedure entered through `syscall`.
         let count = entry.map_or(starts, |entry| entries.get(&entry).copied().unwrap_or(0));
         // The definition line is coverable and hit on every entry. A
         // procedure whose body is one basic block has no row there, and LCOV
@@ -236,11 +237,12 @@ impl<'a> PackageView<'a> {
 
     /// How many times `child` started as the child of `parent`.
     ///
-    /// A procedure entered by `call`, dynamically, or from another package
-    /// has one source tree however many places call it, so an arm that is
-    /// such a bare call shares its node with every other call of that
-    /// procedure; only the edge recorded by the collector tells the arm's
-    /// own starts.
+    /// A procedure entered dynamically or from another package has one
+    /// source tree however many places call it, and a procedure entered by
+    /// `call` has one tree per inlined copy of the caller, however many
+    /// `call`s that copy holds, so an arm that is such a bare call shares
+    /// its node with other calls of that procedure; only the edge recorded
+    /// by the collector tells the arm's own starts.
     fn starts_from(&self, parent: u32, child: impl Into<u32>) -> u64 {
         self.hits.edge_starts.get(&(parent, child.into())).copied().unwrap_or(0)
     }
@@ -250,20 +252,27 @@ impl<'a> PackageView<'a> {
     ///
     /// The assembler emits a copy of a procedure's source tree at every
     /// `exec` of it and marks the copy's rows with an inline call naming the
-    /// procedure, so the procedure's own root never runs. A copy is entered
-    /// where its inline call begins: at a node whose parent does not carry
-    /// the same call, or in the middle of a block. On a block it counts once
-    /// per execution of the first operation of the call's range; on a
-    /// control node, which has no operations, once per start of the node.
+    /// procedure, so the procedure's own root runs only through a `call`. A
+    /// copy is entered where its inline call begins: at a node whose parent
+    /// does not carry the same call, or in the middle of a block. On a block
+    /// it counts once per execution of the first operation of the call's
+    /// range; on a control node, which has no operations, once per start of
+    /// the node.
     ///
     /// A `call` inside such a copy clones the callee's tree as well, without
     /// an inline call naming the callee: the clone's root is the `call`
-    /// node's child. It is entered once per start of that child, credited to
-    /// the one function whose MAST root it is; a root shared by several
-    /// functions cannot be credited and is skipped.
+    /// node's child, shared by every `call` of the callee within the copy.
+    /// Each `call` node enters it once per edge from the node to the child,
+    /// credited to the one function whose MAST root the child is; a root
+    /// shared by several functions cannot be credited and is skipped, and
+    /// the function's own root, the child of a `call` outside any copy, is
+    /// counted by its starts instead.
     fn copy_entries(&self) -> BTreeMap<u32, u64> {
         let debug_info = &self.package.debug_info;
         let nodes = debug_info.nodes();
+        // A clone shared by several `call` nodes keeps the last of them as
+        // its parent; they carry the same inherited inline calls, so the
+        // choice does not matter for the entries.
         let mut parent = vec![None; nodes.len()];
         for (node_id, node) in nodes.iter().enumerate() {
             for child in &node.children {
@@ -288,10 +297,11 @@ impl<'a> PackageView<'a> {
                 && let Some(child_node) = debug_info.source_node(*child)
                 && let Some(callee) = self.exec(child_node)
                 && let Some(Some(function)) = function_by_root.get(&callee.digest())
+                // The function's own root is counted by its starts.
                 && debug_info.functions()[*function as usize].source_node.into_option()
                     != Some(*child)
             {
-                *entries.entry(*function).or_default() += self.starts(*child);
+                *entries.entry(*function).or_default() += self.starts_from(node_id as u32, *child);
             }
             if node.inline_calls.is_empty() {
                 continue;

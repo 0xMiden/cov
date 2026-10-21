@@ -261,8 +261,8 @@ fn arms_that_are_procedure_calls() {
         &functions(file),
         &[("work", 1, 4), ("other", 9, 3), ("step", 17, 4), ("$main", 25, 2)],
     );
-    // The roots of work, other, and step also start from the calls at lines
-    // 26 to 28, and work's from both `if`s.
+    // The copies of work, other, and step at the calls on lines 26 to 28 and
+    // in both `if`s add up to the same counts.
     assert_eq!(
         branches(file),
         [
@@ -277,7 +277,7 @@ fn arms_that_are_procedure_calls() {
 }
 
 /// A procedure made only of `exec` calls has no row of its own; its count
-/// comes from its root node's starts.
+/// comes from the entries of its inlined copies.
 #[test]
 fn procedure_of_only_execs() {
     let (_tmp, coverage) = coverage_dir();
@@ -311,22 +311,63 @@ fn procedures_reached_by_exec_and_call() {
     let report = default_report(&coverage);
     let file = only_file(&report, &source);
 
-    // `leaf` runs twice through `middle` and three times through `wrapped`.
-    assert_eq!(file.lines, BTreeMap::from([(1, 5), (2, 5), (5, 1), (10, 1), (14, 3), (18, 1)]));
+    // `middle` runs twice through the one clone `outer`'s two `call`s share,
+    // and twice through its own root, called from `main`; `leaf` runs twice
+    // per `middle` and three times through `wrapped`.
+    assert_eq!(
+        file.lines,
+        BTreeMap::from([(1, 11), (2, 11), (5, 4), (10, 1), (15, 3), (19, 1)])
+    );
     assert_functions(
         &functions(file),
         &[
-            ("leaf", 1, 5),
-            ("middle", 5, 1),
+            ("leaf", 1, 11),
+            ("middle", 5, 4),
             ("outer", 10, 1),
-            ("wrapped", 14, 3),
-            ("$main", 18, 1),
+            ("wrapped", 15, 3),
+            ("$main", 19, 1),
         ],
     );
 }
 
-/// Procedures calling each other three levels deep, each with an `if` so
-/// none is inlined: main calls a once, a calls b twice, b calls c twice.
+/// The entry of a dynamically linked library whose body compiles to the same
+/// MAST as another procedure of the library: the processor cannot pick the
+/// entry's source root and tracks no source nodes for the invocation, so
+/// everything below the entry reports zero. A VM gap recorded in 0018; the
+/// expectations here are the correct ones, for when it closes.
+#[test]
+#[ignore = "VM gap (0018): ambiguous source root of a dynamically linked entry procedure"]
+fn dynamic_library_entry_sharing_a_body() {
+    let (_tmp, coverage) = coverage_dir();
+    let library = fixture("ambiguous_entry_lib");
+    let source = fixture("ambiguous_entry_program");
+    let source_manager: Arc<dyn SourceManager> = Arc::new(DefaultSourceManager::default());
+    let package: Arc<Package> = Arc::from(
+        Assembler::new(source_manager.clone())
+            .assemble_library(
+                "ambiguous",
+                library_module(&source_manager, "fixtures::ambiguous_entry_lib", &library),
+                Vec::<Box<miden_assembly::ast::Module>>::new(),
+            )
+            .unwrap(),
+    );
+    let program = Arc::from(
+        Assembler::new(source_manager)
+            .with_package(package.clone(), Linkage::Dynamic)
+            .unwrap()
+            .assemble_program("program", source.clone())
+            .unwrap(),
+    );
+    let host = DefaultHost::default().with_library(HostLibrary::from(package)).unwrap();
+    record_run(&coverage, &program, host, "dynamic", &[0, 1]).unwrap();
+    let report = default_report(&coverage);
+    let file = file(&report, &library);
+    assert_eq!(file.lines, BTreeMap::from([(1, 1), (2, 1), (3, 1), (5, 0), (9, 1), (13, 1)]));
+    assert_functions(&functions(file), &[("leaf", 1, 1), ("middle", 9, 1), ("entry", 13, 1)]);
+}
+/// Procedures calling each other three levels deep, each with an `if`, so
+/// every copy is a tree of its own: main calls a once, a calls b twice, b
+/// calls c twice.
 #[test]
 fn calls_three_levels_deep() {
     let (_tmp, coverage) = coverage_dir();
@@ -361,12 +402,11 @@ fn calls_three_levels_deep() {
 /// Two procedures with identical bodies share one exec node; first is called
 /// twice with a true condition, second once with a false one.
 ///
-/// Each procedure keeps a source tree of its own over the shared exec nodes,
-/// and the joins of `begin` refer to the tree of the procedure each call
-/// names, so the counts stay apart. Attribution swapped between the two
-/// procedures was reported earlier; it does not occur with assembler 0.35
-/// in this shape, with the calls reordered, without the `push` before each
-/// call, or with `call` instead of `exec`.
+/// Each call gets a copy of the callee's source tree over the shared exec
+/// nodes, so the counts stay apart. Attribution swapped between the two
+/// procedures was reported earlier; it does not occur in this shape, with
+/// the calls reordered, without the `push` before each call, or with `call`
+/// instead of `exec`.
 #[test]
 fn deduplicated_bodies() {
     let (_tmp, coverage) = coverage_dir();
@@ -667,11 +707,11 @@ fn one_file_under_two_paths() {
 }
 
 /// Arms that are bare procedure calls, where the procedures are also arms
-/// of another `if` and are called directly. `a` and `b` share their source
-/// trees between `pick`, `pick2`, and `main`, so node starts cannot tell
-/// the arms apart; the arm counts come from the parent-to-child edges the
-/// collector records. The loop body is a bare call to `c`, which is also
-/// called directly.
+/// of another `if` and are called directly. Each arm is a copy of its own
+/// here, and the arm counts come out the same from the copies as from the
+/// parent-to-child edges the collector records, which are what tells arms
+/// apart when the callee is not copied. The loop body is a bare call to
+/// `c`, which is also called directly.
 #[test]
 fn shared_arms_in_two_splits_and_a_loop() {
     let (_tmp, coverage) = coverage_dir();
