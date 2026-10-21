@@ -91,9 +91,9 @@ pub enum RunOutcome {
 
 impl RunOutcome {
     /// The outcome of an execution that ended with `result`.
-    pub fn of<E: core::fmt::Display>(result: &Result<(), E>) -> Self {
+    pub fn of<T, E: core::fmt::Display>(result: &Result<T, E>) -> Self {
         match result {
-            Ok(()) => Self::Ok,
+            Ok(_) => Self::Ok,
             Err(error) => Self::Failed(alloc::format!("{error}")),
         }
     }
