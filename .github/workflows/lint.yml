@@ -73,6 +73,9 @@ jobs:
         run: |
           rustup update --no-self-update
           make clippy
+      - name: Collector without std
+        run: |
+          make check-no-std
 
   rustfmt:
     name: rustfmt check nightly on ubuntu-latest
