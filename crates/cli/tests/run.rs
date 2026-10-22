@@ -111,9 +111,11 @@ fn runs_are_written_to_the_coverage_directory() {
 
 /// A program whose advice map gives a key another value than the inputs file
 /// does: the execution context cannot be built, so the program fails before
-/// its first cycle. The run is still written, as a failed run of no cycles
-/// that passed through no package. Returning the error before writing would
-/// leave the directory empty and lose the failure from the report.
+/// its first cycle, which is what the test pins; any failure of building the
+/// context looks the same from here. The run is still written, as a failed
+/// run of no cycles that passed through no package. Returning the error
+/// before writing would leave the directory empty and lose the failure from
+/// the report.
 #[test]
 fn a_run_whose_context_cannot_be_built_is_written() {
     let tmp = tempfile::tempdir().unwrap();
@@ -137,9 +139,11 @@ fn a_run_whose_context_cannot_be_built_is_written() {
     assert!(matches!(runs[0].outcome, RunOutcome::Failed(_)), "{:?}", runs[0].outcome);
     assert_eq!(runs[0].cycles, 0);
     assert!(runs[0].packages.is_empty(), "{:?}", runs[0].packages);
-    // The directory may not exist: nothing ever asked for a package to be written.
-    let packages = fs::read_dir(cov.join("packages")).map_or(0, |dir| dir.count());
-    assert_eq!(packages, 0, "no package file is written");
+    // A missing directory reads as no packages; any other error fails the test.
+    assert!(
+        CoverageDir::new(&cov).read_packages().unwrap().is_empty(),
+        "no package is written"
+    );
 }
 
 #[test]

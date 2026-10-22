@@ -799,8 +799,9 @@ fn a_root_shared_only_across_packages_is_not_credited() {
 /// restricting them to packages with hits was considered and not done. A
 /// collector that wrote only packages with hits would drop the library, leave
 /// the static program's record of `only_execs` the only identity behind the
-/// root, and credit it with both `call`s, reporting `only_execs` as 2 and
-/// `entry`, recorded nowhere else, not at all.
+/// root, credit it with both `call`s, and report `entry`, recorded nowhere
+/// else, not at all: the right number for `only_execs` by the wrong rule, and
+/// a function gone from the report.
 #[test]
 fn a_package_touched_only_untracked_adds_its_identities() {
     let (_tmp, coverage) = coverage_dir();

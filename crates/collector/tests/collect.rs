@@ -561,7 +561,8 @@ fn library_module(
 
 /// Assembles the fixture `library` as the module `fixtures::infer` of a
 /// library, and `infer_program`, which links it dynamically. Returns the
-/// library, the program, and a host serving the library.
+/// library, the program, and a host serving the library. The same shape is
+/// built in the cov crate's `shapes.rs` for the reporter's test of it.
 fn infer_shape(library: &str) -> (Arc<Package>, Arc<Package>, DefaultHost) {
     let source_manager: Arc<dyn SourceManager> = Arc::new(DefaultSourceManager::default());
     let module = library_module(&source_manager, "fixtures::infer", &fixture_path(library));

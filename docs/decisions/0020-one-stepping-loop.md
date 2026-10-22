@@ -1,8 +1,8 @@
 # 0020: One stepping loop in the engine
 
 Status: accepted (2026-10-22). Amends the consequences of 0018: the
-differential test is removed and the debug executor is a consumer of the
-stepper.
+differential test is removed, the debug executor is a consumer of the
+stepper, and the engine change is no longer additive.
 
 ## Context
 

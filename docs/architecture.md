@@ -20,15 +20,14 @@ Coverage flows through four stages, each handing a plain artifact to the next.
 2. **Collection.** The debugger engine steps the VM and resolves every cycle to
    source; the collector counts, from those records, which source nodes
    started, from which parent, and which operations ran. Counts are of
-   attempts: a cycle is recorded before it runs, so a failing row counts, and
-   so does the edge of a `call` whose callee is never found. A cycle whose
-   source the engine could only guess is counted as a cycle and marks its
-   package as touched, nothing more, and a package the execution passed
-   through is reported whether or not anything in it was attributed.
-   Invariant: a guessed source is never a hit; coverage may be lost, never
-   invented. Two edges are the exception, by decision: the edge from a
-   guessed parent to a tracked child, and a `call` whose root a callee the
-   report cannot see shares with a visible function.
+   attempts: a failing row counts, and so does the edge of a `call` whose
+   callee is never found. A cycle whose source the engine could only guess
+   is counted as a cycle and marks its package as touched, nothing more. A
+   package with debug info that the execution passed through is reported
+   whether or not anything in it was attributed. Invariant: a guessed source
+   is never a hit; coverage may be lost, never invented. The one exception,
+   accepted until the record names a guessed parent, is the edge from such a
+   parent to a tracked child, which no count of the report reads.
 3. **The coverage directory.** Each VM run ends as one run file holding its
    counts, and each package appears once with its forest and debug info. The
    directory is the only link between collecting and reporting.
@@ -81,7 +80,7 @@ between the first two.
   operations, attached to the source node they introduce.
 - **Location**: a file plus a byte range. Line numbers are not stored; they
   require the source text.
-- **Hit**: one observed execution of a row or a start of a source node.
+- **Hit**: one observed attempt of a row or a start of a source node.
 - **Edge start**: a start of a source node recorded together with the node that
   started it. A procedure entered dynamically or from another package has one
   source tree however many places call it, and the `call`s of one procedure
@@ -99,8 +98,8 @@ between the first two.
 This is the specification the collector and reporter implement together.
 
 1. A row with one or more operations is hit each time its first operation
-   executes. Its later operations are not counted, so a row that expands to
-   five operations is hit once per execution, not five times.
+   is attempted. Its later operations are not counted, so a row that expands
+   to five operations is hit once per execution, not five times.
 2. A row with zero operations is coverable only when it belongs to a split
    node, where it stands for the condition and is hit once per evaluation.
    Zero-operation rows on join and loop nodes are structural duplicates of the
@@ -127,9 +126,8 @@ This is the specification the collector and reporter implement together.
    a `call` into the function's own root is counted by the root's starts, not
    by its edge. The function's definition line is credited with that count,
    because LCOV consumers reject a function record without a line record.
-   Invariant: the
-   root start of a procedure entered through an external node is never
-   recorded, or the edges and the starts would both count the entry.
+   Invariant: the root start of a procedure entered through an external node
+   is never recorded, or the edges and the starts would both count the entry.
 7. Hits are counts. Any consumer that wants booleans truncates at output time.
 
 ## Branch semantics
@@ -210,8 +208,8 @@ waits for the debugger to follow.
 
 ## Report scope
 
-Every package a run touched is reported, including linked libraries whose
-sources resolve. Include and exclude path globs narrow the report; there is no
+Every package with debug info that a run touched is reported, including
+linked libraries whose sources resolve. Include and exclude path globs narrow the report; there is no
 implicit notion of "the user's package", because for library coverage the
 library is the target.
 

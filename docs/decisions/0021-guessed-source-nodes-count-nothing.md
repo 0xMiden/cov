@@ -27,11 +27,13 @@ its first cycle.
 A cycle whose source node was inferred counts as a cycle and marks its
 package as touched, but hits nothing: no node start, no edge, no operation.
 The first cycle of an execution is exempt, since it is inferred only in the
-exact case. Invariant: coverage may be lost, never invented. The two
-exceptions to "nothing that did not happen" are attempts, not guesses, and
-stand: a `call` whose callee the host cannot find counts one entry (the edge
-is recorded when the child starts), and a digest shared with a callee the
-report cannot see is credited to the visible function.
+exact case. Invariant: coverage may be lost, never invented. Three
+exceptions stand. Two are attempts, not guesses: a `call` whose callee the
+host cannot find counts one entry (the edge is recorded when the child
+starts), and a digest shared with a callee the report cannot see is credited
+to the visible function (a reporter rule, rule 6 of the map). One is a guess:
+the edge from a guessed parent to a tracked child, described below,
+accepted until the record names a guessed parent.
 
 Every package the execution passed through is written, hit or not, so what
 ran without being attributed shows as uncovered lines rather than leaving
@@ -50,16 +52,22 @@ the report.
 
 ## Consequences
 
-- Below an ambiguous dynamic entry the report shows zero counts. The entry
-  itself is counted from the caller's side: through the copy or the external
-  node that enters it, which names the function; through a `call`, only when
-  the root names one function across the directory, else nowhere. The
-  ignored reporter test of 0018 keeps the numbers for when the processor and
-  the `if`-root follow-up close the gap.
-- A tracked child may still carry a guessed parent: a dynamic node of an
-  untracked invocation whose callee root the processor tracks. The record
-  does not flag the parent, and the edge from it is recorded. Contrived, and
-  accepted until a record flags its parent.
+- Below an ambiguous dynamic entry the report shows zero counts, except for
+  a nested dynamic callee of the same forest that the processor tracks
+  again. The entry itself is counted from the caller's side: through the
+  copy or the external node that enters it, which names the function;
+  through a `call`, only when the root names one function across the
+  directory, else nowhere. The same gap through `call`, `dynexec` and
+  `dyncall` is covered by the same rule; only the `exec` and `call` doors
+  have a fixture. The ignored reporter test of 0018 keeps the numbers for
+  when the processor and the `if`-root follow-up close the gap.
+- A tracked child may still carry a guessed parent: the root of a dynamic
+  callee in the same forest as an untracked invocation takes the dynamic
+  node, or the engine's fallback for it, as its parent, and the record does
+  not say the parent was a guess. The edge is recorded in the run file; the
+  reporter reads edges only from `call`, conditional and loop parents, so no
+  count of the report changes. Accepted until the record names a guessed
+  parent.
 - A package reached only through an untracked invocation is now in the
   directory, and its records take part in the identity set of the call
   rule: a root it shares with another function of its own becomes ambiguous
@@ -70,8 +78,9 @@ the report.
   context the engine cannot build, but the program executor of 0018 runs the
   processor's own executor without collecting for an entry it cannot step
   from, where the command line writes a failed run; advice inputs over the
-  processor's budget reach the executor as an error and stop the command
-  line before any run, as they did before; and a run file that cannot be
+  processor's budget are an error of the executor's constructor and a panic
+  of the command line before any run, as before this change; and a run file
+  that cannot be
   written drops the execution error on the command line while the executor
   reports the write failure and returns the execution's result. Unified when
   the executor is refined for the protocol.

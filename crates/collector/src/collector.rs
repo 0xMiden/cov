@@ -23,7 +23,8 @@ use crate::{
 /// attributed and is not kept.
 #[derive(Default)]
 pub struct Collector {
-    /// The forests seen so far, keyed by the address of their allocation.
+    /// The forests with debug info seen so far, keyed by the address of their
+    /// allocation.
     forests: BTreeMap<usize, ForestEntry>,
     /// Number of records received: one per attempted cycle, the failing one
     /// included.
@@ -46,8 +47,8 @@ struct ForestEntry {
 /// directory.
 pub struct CollectorOutput {
     /// One entry per forest with debug info the execution passed through, hit
-    /// or not; forests without debug info cannot be attributed to source and
-    /// are dropped.
+    /// or not; a forest without debug info cannot be attributed to source and
+    /// is not kept.
     pub packages: Vec<PackageFile>,
     /// The run with hits for the same packages.
     pub run: RunFile,
@@ -100,6 +101,9 @@ impl Collector {
         }
         if let Some(start) = cycle.node_start {
             hits.record_node_start(start.node.into());
+            // The parent of a same-forest dynamic callee's root may itself be
+            // a guess, which the record does not say; the reporter reads no
+            // edge from a dynamic node, so the count stands (0021).
             if let Some(parent) = start.parent {
                 hits.record_edge_start(parent.into(), start.node.into());
             }
