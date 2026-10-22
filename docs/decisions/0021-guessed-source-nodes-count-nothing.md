@@ -51,23 +51,30 @@ the report.
 ## Consequences
 
 - Below an ambiguous dynamic entry the report shows zero counts. The entry
-  itself is counted from the caller's side when its root names one function,
-  through the copy or the external node that enters it; an ambiguous root is
-  counted nowhere, for a `call` as for anything else. The ignored reporter
-  test of 0018 keeps the numbers for when the processor and the `if`-root
-  follow-up close the gap.
+  itself is counted from the caller's side: through the copy or the external
+  node that enters it, which names the function; through a `call`, only when
+  the root names one function across the directory, else nowhere. The
+  ignored reporter test of 0018 keeps the numbers for when the processor and
+  the `if`-root follow-up close the gap.
+- A tracked child may still carry a guessed parent: a dynamic node of an
+  untracked invocation whose callee root the processor tracks. The record
+  does not flag the parent, and the edge from it is recorded. Contrived, and
+  accepted until a record flags its parent.
 - A package reached only through an untracked invocation is now in the
   directory, and its records take part in the identity set of the call
   rule: a root it shares with another function of its own becomes ambiguous
   across the directory, and a `call` to that function from a tracked program
   is withheld too, where it was credited when the package was not written.
 - A run file's cycle count includes the cycles that hit nothing.
-- The two drivers do not fail alike: the command line writes a failed run
-  for an initial context the engine cannot build, while the program executor
-  of 0018 runs the processor's own executor without collecting for an entry
-  it cannot step from; advice inputs larger than the processor's limit still
-  stop the command line before any run, as they did before. Unified when the
-  executor is refined for the protocol.
+- The two drivers do not fail alike. Both write a failed run for an initial
+  context the engine cannot build, but the program executor of 0018 runs the
+  processor's own executor without collecting for an entry it cannot step
+  from, where the command line writes a failed run; advice inputs over the
+  processor's budget reach the executor as an error and stop the command
+  line before any run, as they did before; and a run file that cannot be
+  written drops the execution error on the command line while the executor
+  reports the write failure and returns the execution's result. Unified when
+  the executor is refined for the protocol.
 - A directory written before the VM 0.36 move is rejected by the VM's own
   debug-info version message rather than the reporter's, a consequence of
   the VM move rather than of this decision; the formats of the directory are

@@ -18,8 +18,9 @@ use crate::{
 /// Forests are identified by the address of their shared allocation, which is
 /// stable because the processor keeps the forest it loaded for a procedure for
 /// the rest of the execution and hands out clones of that `Arc`. The collector
-/// keeps a clone of each forest so the address cannot be reused while it is
-/// recording.
+/// keeps a clone of each forest with debug info so the address cannot be
+/// reused while it is recording; a forest without debug info cannot be
+/// attributed and is not kept.
 #[derive(Default)]
 pub struct Collector {
     /// The forests seen so far, keyed by the address of their allocation.
@@ -35,8 +36,8 @@ struct ForestEntry {
     forest: Arc<MastForest>,
     /// The forest's commitment, which names the package in the run file.
     commitment: Word,
-    /// The debug info of the forest's package, if it carried any.
-    debug_info: Option<Arc<PackageDebugInfo>>,
+    /// The debug info of the forest's package.
+    debug_info: Arc<PackageDebugInfo>,
     /// The hits recorded against the package's debug info.
     hits: PackageHits,
 }
@@ -83,7 +84,7 @@ impl Collector {
         // A package is reported from the first record in its forest, hit or
         // not, so that what ran without being attributed shows as uncovered
         // rather than disappearing.
-        let hits = &mut self.entry(cycle.forest, Some(debug_info)).hits;
+        let hits = &mut self.entry(cycle.forest, debug_info).hits;
         // The processor tracks no source node for an invocation whose entry
         // root it could not pick (and, when that invocation `call`s a
         // procedure, none for the callee either), and the engine then guesses
@@ -117,11 +118,10 @@ impl Collector {
         let mut packages = Vec::new();
         let mut run_packages = Vec::new();
         for entry in self.forests.into_values() {
-            let Some(debug_info) = entry.debug_info else { continue };
             packages.push(PackageFile {
                 commitment: entry.commitment,
                 forest: entry.forest,
-                debug_info,
+                debug_info: entry.debug_info,
             });
             run_packages.push((entry.commitment, entry.hits));
         }
@@ -140,13 +140,13 @@ impl Collector {
     fn entry(
         &mut self,
         forest: &Arc<MastForest>,
-        debug_info: Option<&Arc<PackageDebugInfo>>,
+        debug_info: &Arc<PackageDebugInfo>,
     ) -> &mut ForestEntry {
         let key = Arc::as_ptr(forest) as usize;
         self.forests.entry(key).or_insert_with(|| ForestEntry {
             forest: forest.clone(),
             commitment: forest.commitment(),
-            debug_info: debug_info.cloned(),
+            debug_info: debug_info.clone(),
             hits: PackageHits::default(),
         })
     }
