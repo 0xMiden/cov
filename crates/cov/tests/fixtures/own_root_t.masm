@@ -1,0 +1,10 @@
+use fixtures::own_root_d
+
+proc helper
+    push.2 drop
+end
+
+pub proc target
+    call.helper
+    exec.own_root_d::leaf
+end

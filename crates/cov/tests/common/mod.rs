@@ -33,7 +33,8 @@ pub fn assemble_program(source: &Path) -> Arc<Package> {
 
 /// Runs `package` on `stack` (first element on top) with `host` under the
 /// collector and writes the run, named `name`, into `coverage` whatever the
-/// outcome.
+/// outcome of the execution. An execution context that cannot be built panics
+/// instead, before anything is written.
 pub fn record_run(
     coverage: &CoverageDir,
     package: &Arc<Package>,

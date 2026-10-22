@@ -11,14 +11,20 @@ use miden_assembly::Assembler;
 use miden_cov_collector::{RunOutcome, dir::CoverageDir};
 use miden_mast_package::{Package, Word};
 
-/// Assembles the fixture from its path, so debug locations carry the real
-/// file path, and writes it to `dir`. Returns the package and its file.
-fn assemble_fixture(dir: &Path) -> (Package, PathBuf) {
-    let source = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/fixture.masm");
-    let package = *Assembler::default().assemble_program("fixture", source).unwrap();
-    let path = dir.join("fixture.masp");
+/// Assembles the fixture `tests/fixtures/<name>.masm` from its path, so debug
+/// locations carry the real file path, and writes it to `dir`. Returns the
+/// package and its file.
+fn assemble(dir: &Path, name: &str) -> (Package, PathBuf) {
+    let source = Path::new(env!("CARGO_MANIFEST_DIR")).join(format!("tests/fixtures/{name}.masm"));
+    let package = *Assembler::default().assemble_program(name, source).unwrap();
+    let path = dir.join(format!("{name}.masp"));
     package.write_to_file(&path).unwrap();
     (package, path)
+}
+
+/// Assembles `fixture.masm` with [`assemble`].
+fn assemble_fixture(dir: &Path) -> (Package, PathBuf) {
+    assemble(dir, "fixture")
 }
 
 /// Writes an inputs file with `stack` as the operand stack, top first.
@@ -101,6 +107,37 @@ fn runs_are_written_to_the_coverage_directory() {
     let runs = CoverageDir::new(&cov).read_runs().unwrap();
     assert_run(&runs[2], "invalid", commitment);
     assert!(matches!(runs[2].outcome, RunOutcome::Failed(_)), "{:?}", runs[2].outcome);
+}
+
+/// A program whose advice map gives a key another value than the inputs file
+/// does: the execution context cannot be built, so the program fails before
+/// its first cycle. The run is still written, as a failed run of no cycles
+/// that passed through no package. Returning the error before writing would
+/// leave the directory empty and lose the failure from the report.
+#[test]
+fn a_run_whose_context_cannot_be_built_is_written() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (package, masp) = assemble(tmp.path(), "adv_map");
+    let cov = tmp.path().join("cov");
+    let (key, _) = package.mast_forest().advice_map().iter().next().unwrap();
+    let inputs = tmp.path().join("conflict.toml");
+    fs::write(
+        &inputs,
+        format!("[[inputs.advice.map]]\ndigest = \"{}\"\nvalues = [2]\n", key.to_hex()),
+    )
+    .unwrap();
+
+    let output = miden_cov_run(&masp, &cov).arg("--inputs").arg(&inputs).output().unwrap();
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(!output.status.success(), "stdout: {stdout}\nstderr: {stderr}");
+    assert!(stderr.contains("already present in the advice map"), "{stderr}");
+    assert!(stdout.starts_with("wrote "), "stdout: {stdout}\nstderr: {stderr}");
+    let runs = CoverageDir::new(&cov).read_runs().unwrap();
+    assert_eq!(runs.len(), 1);
+    assert!(matches!(runs[0].outcome, RunOutcome::Failed(_)), "{:?}", runs[0].outcome);
+    assert_eq!(runs[0].cycles, 0);
+    assert!(runs[0].packages.is_empty(), "{:?}", runs[0].packages);
 }
 
 #[test]

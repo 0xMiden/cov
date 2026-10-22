@@ -1,0 +1,6 @@
+use fixtures::infer
+
+begin
+    push.1
+    exec.infer::entry
+end

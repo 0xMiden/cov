@@ -54,16 +54,28 @@ fn fixture() -> Arc<Package> {
     Arc::from(Assembler::default().assemble_program("fixture", SRC).unwrap())
 }
 
+/// Runs `package` on `stack` (first element on top) with `host` under a
+/// collector and returns the collector, the outcome, and the VM clock at the
+/// end.
+fn run_with_clock(
+    package: &Arc<Package>,
+    stack: &[u64],
+    mut host: DefaultHost,
+) -> (Collector, Result<(), ExecutionError>, u64) {
+    let stack: Vec<Felt> = stack.iter().map(|value| Felt::new(*value).unwrap()).collect();
+    let processor = FastProcessor::new(StackInputs::new(&stack).unwrap());
+    let mut stepper = Stepper::for_package(processor, package.clone()).unwrap();
+    let mut collector = Collector::new();
+    let result = stepper.run_sync(&mut host, |cycle| collector.on_cycle(cycle));
+    let clock = stepper.cycle() as u64;
+    (collector, result, clock)
+}
+
 /// Runs the fixture with `flag` and `n` on the stack and returns the hits of
 /// its only package and the number of cycles recorded.
 fn run(package: &Arc<Package>, flag: u64, n: u64) -> (PackageHits, u64) {
-    let mut host = DefaultHost::default();
-    let processor = FastProcessor::new(
-        StackInputs::new(&[Felt::new(flag).unwrap(), Felt::new(n).unwrap()]).unwrap(),
-    );
-    let mut stepper = Stepper::for_package(processor, package.clone()).unwrap();
-    let mut collector = Collector::new();
-    stepper.run_sync(&mut host, |cycle| collector.on_cycle(cycle)).unwrap();
+    let (collector, result, _) = run_with_clock(package, &[flag, n], DefaultHost::default());
+    result.unwrap();
     let output = collector.finish("test".into(), RunOutcome::Ok);
     assert_eq!(output.packages.len(), 1);
     assert_eq!(output.packages[0].commitment, package.mast_forest_commitment());
@@ -159,13 +171,8 @@ fn coverage_dir_round_trip() {
     let tmp = tempfile::tempdir().unwrap();
     let dir = CoverageDir::new(tmp.path().join("cov"));
 
-    let mut host = DefaultHost::default();
-    let processor = FastProcessor::new(
-        StackInputs::new(&[Felt::new(1).unwrap(), Felt::new(2).unwrap()]).unwrap(),
-    );
-    let mut stepper = Stepper::for_package(processor, package.clone()).unwrap();
-    let mut collector = Collector::new();
-    stepper.run_sync(&mut host, |cycle| collector.on_cycle(cycle)).unwrap();
+    let (collector, result, _) = run_with_clock(&package, &[1, 2], DefaultHost::default());
+    result.unwrap();
     let output = collector.finish("round-trip".into(), RunOutcome::Failed("boom".into()));
     let run_path = dir.write_output(&output).unwrap();
     // Writing the same package again is a no-op.
@@ -264,7 +271,7 @@ fn sum_program() -> Arc<Package> {
 ///
 /// The variable is process-global and reading it from another thread while it
 /// changes is undefined behavior, so it is only ever set for a child process.
-fn run_in_child(name: &str, cwd: &std::path::Path, dir: Option<&std::path::Path>) -> String {
+fn run_in_child(name: &str, cwd: &Path, dir: Option<&Path>) -> String {
     let mut command = Command::new(std::env::current_exe().unwrap());
     command.args(["--exact", name, "--ignored", "--nocapture"]).current_dir(cwd);
     match dir {
@@ -503,23 +510,6 @@ fn coverage_executor_writes_one_run_per_execution() {
     assert_eq!(std::fs::read_dir(empty.path()).unwrap().count(), 0);
 }
 
-/// Runs `package` on `stack` (first element on top) with `host` under a
-/// collector and returns the collector, the outcome, and the VM clock at the
-/// end.
-fn run_with_clock(
-    package: &Arc<Package>,
-    stack: &[u64],
-    mut host: DefaultHost,
-) -> (Collector, Result<(), ExecutionError>, u64) {
-    let stack: Vec<Felt> = stack.iter().map(|value| Felt::new(*value).unwrap()).collect();
-    let processor = FastProcessor::new(StackInputs::new(&stack).unwrap());
-    let mut stepper = Stepper::for_package(processor, package.clone()).unwrap();
-    let mut collector = Collector::new();
-    let result = stepper.run_sync(&mut host, |cycle| collector.on_cycle(cycle));
-    let clock = u64::from(u32::from(stepper.processor().state().clock()));
-    (collector, result, clock)
-}
-
 /// The collector counts one record per VM cycle: the finalization step after
 /// the last cycle adds none.
 #[test]
@@ -547,23 +537,24 @@ fn a_failed_run_counts_the_failing_cycle() {
     assert_eq!(collector.finish("failed".into(), outcome).run.cycles, clock + 1);
 }
 
-/// The path of the reporter's fixture `<name>.masm`.
-fn cov_fixture(name: &str) -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join(format!("../cov/tests/fixtures/{name}.masm"))
+/// The path of the fixture `tests/fixtures/<name>.masm`.
+fn fixture_path(name: &str) -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join(format!("tests/fixtures/{name}.masm"))
 }
 
 /// A run through a dynamically linked library whose entry procedure's root is
 /// also the root of the procedure it wraps: the processor tracks no source
-/// node for the invocation and the engine infers one for each of its cycles.
-/// The collector records no hit for those cycles but counts them, so the
-/// run's cycles still equal the clock at the end.
+/// node for the invocation, so its first cycle has none and the engine infers
+/// one for each of the others. The collector records no hit for those cycles
+/// but counts them, so the run's cycles still equal the clock at the end; a
+/// collector that skipped them would report fewer.
 #[test]
 fn inferred_cycles_count_toward_the_clock() {
     let source_manager: Arc<dyn SourceManager> = Arc::new(DefaultSourceManager::default());
     let module = ModuleParser::new(Some(ModuleKind::Library))
         .parse_file(
             Some(miden_assembly::Path::new("fixtures::infer")),
-            cov_fixture("infer"),
+            fixture_path("infer"),
             source_manager.clone(),
         )
         .unwrap();
@@ -576,7 +567,7 @@ fn inferred_cycles_count_toward_the_clock() {
         Assembler::new(source_manager)
             .with_package(library.clone(), Linkage::Dynamic)
             .unwrap()
-            .assemble_program("program", cov_fixture("infer_program"))
+            .assemble_program("program", fixture_path("infer_program"))
             .unwrap(),
     );
     let host = DefaultHost::default().with_library(HostLibrary::from(library.clone())).unwrap();
@@ -586,7 +577,7 @@ fn inferred_cycles_count_toward_the_clock() {
     let output = collector.finish("inferred".into(), RunOutcome::Ok);
     assert_eq!(output.run.cycles, clock);
     // The library ran but nothing was recorded against it: every one of its
-    // cycles was inferred.
+    // cycles was untracked.
     let (_, hits) = output
         .run
         .packages

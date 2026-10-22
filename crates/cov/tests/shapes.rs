@@ -705,6 +705,69 @@ fn an_own_root_called_from_two_programs_counts_its_starts() {
     );
 }
 
+/// A program linking module `own_root_t` statically and library `own_root_d`
+/// dynamically, `call`ing `target` from `begin`. `target` `exec`s `leaf` of
+/// the library, which imports the library's whole function table into the
+/// program. The library is built with `own_root_t` as a second module, which
+/// its `x` `exec`s, so the imported table carries a record of `target`
+/// without a source node, ahead of the program's own record of `target`,
+/// which holds the root. `target` begins with a `call` rather than a block
+/// so that the library's copy of `leaf` is not merged into the block before
+/// it: both records then have one MAST root. The child of the program's
+/// `call` is that root, whose starts count the call. A lookup that checked
+/// only the caller's first record for the root would miss it and count the
+/// call twice, once by the starts and once by the edge, reporting `target` as
+/// 2.
+#[test]
+fn an_own_root_after_an_imported_record_counts_its_starts() {
+    let (_tmp, coverage) = coverage_dir();
+    let library_d = fixture("own_root_d");
+    let library_t = fixture("own_root_t");
+    let source_manager: Arc<dyn SourceManager> = Arc::new(DefaultSourceManager::default());
+    let dynamic: Arc<Package> = Arc::from(
+        Assembler::new(source_manager.clone())
+            .assemble_library(
+                "own_root_d",
+                library_module(&source_manager, "fixtures::own_root_d", &library_d),
+                [library_module(&source_manager, "fixtures::own_root_t", &library_t)],
+            )
+            .unwrap(),
+    );
+    let mut assembler = Assembler::new(source_manager.clone())
+        .with_package(dynamic.clone(), Linkage::Dynamic)
+        .unwrap();
+    assembler
+        .compile_and_statically_link(library_module(
+            &source_manager,
+            "fixtures::own_root_t",
+            &library_t,
+        ))
+        .unwrap();
+    let program: Arc<Package> =
+        Arc::from(assembler.assemble_program("program", fixture("own_root_program")).unwrap());
+    // The shape under test: the imported record of `target` precedes the
+    // program's own, under the same MAST root.
+    let debug_info = program.debug_info().unwrap().unwrap();
+    let records: Vec<_> = debug_info
+        .functions()
+        .iter()
+        .filter(|function| {
+            debug_info
+                .get_string(function.name_idx)
+                .is_some_and(|name| name.ends_with("::target"))
+        })
+        .map(|function| (function.source_node.into_option().is_some(), function.mast_root))
+        .collect();
+    assert_eq!(records.len(), 2, "{records:?}");
+    assert_eq!((records[0].0, records[1].0), (false, true));
+    assert_eq!(records[0].1, records[1].1);
+    let host = DefaultHost::default().with_library(HostLibrary::from(dynamic)).unwrap();
+    record_run(&coverage, &program, host, "run", &[]).unwrap();
+    let report = default_report(&coverage);
+    assert_functions(&functions(file(&report, &library_d)), &[("leaf", 3, 1), ("x", 7, 0)]);
+    assert_functions(&functions(file(&report, &library_t)), &[("helper", 3, 1), ("target", 7, 1)]);
+}
+
 /// Two libraries in two files whose `only_execs` and `execs` compile to the
 /// same MAST, each reached through a `call` inside an inlined copy from a
 /// program linking only that library. Each package records one function
@@ -728,6 +791,63 @@ fn a_root_shared_only_across_packages_is_not_credited() {
     assert_functions(
         &functions(file(&report, &twin)),
         &[("first", 1, 1), ("second", 5, 1), ("execs", 9, 0), ("calls", 14, 1)],
+    );
+}
+
+/// A library whose `entry` is one `exec` of `only_execs`, so the two share a
+/// root. One program links it statically and `exec`s `wrap`, whose inlined
+/// copy `call`s `only_execs`; another links it dynamically and `call`s
+/// `entry`, an invocation the processor cannot pick a source root for and
+/// leaves untracked. The untracked invocation records no hit in the library,
+/// yet the library's package is written, and its records of `only_execs` and
+/// `entry` put two functions behind the root across the directory, so
+/// neither `call` is credited and both report 0.
+///
+/// The true counts are 1 and 1. They are withheld rather than guessed: the
+/// written package of the untracked invocation is what adds the ambiguity,
+/// since the identities behind a root are drawn from every written package,
+/// hit or not, and restricting them to packages with hits was considered and
+/// not done. A collector that wrote only packages with hits would drop the
+/// library, leave the static program's record of `only_execs` the only
+/// identity behind the root, and credit it with both `call`s, reporting
+/// `only_execs` as 2 and `entry`, recorded nowhere else, not at all.
+#[test]
+fn a_package_touched_only_untracked_adds_its_identities() {
+    let (_tmp, coverage) = coverage_dir();
+    let library = fixture("untracked_lib");
+    let package =
+        assemble_with_module(&fixture("untracked_static"), "fixtures::untracked_lib", &library);
+    record_runs(&coverage, &package, &[&[]]);
+
+    let source_manager: Arc<dyn SourceManager> = Arc::new(DefaultSourceManager::default());
+    let dynamic: Arc<Package> = Arc::from(
+        Assembler::new(source_manager.clone())
+            .assemble_library(
+                "untracked_lib",
+                library_module(&source_manager, "fixtures::untracked_lib", &library),
+                Vec::<Box<miden_assembly::ast::Module>>::new(),
+            )
+            .unwrap(),
+    );
+    let program = Arc::from(
+        Assembler::new(source_manager)
+            .with_package(dynamic.clone(), Linkage::Dynamic)
+            .unwrap()
+            .assemble_program("program", fixture("untracked_dynamic"))
+            .unwrap(),
+    );
+    let host = DefaultHost::default().with_library(HostLibrary::from(dynamic)).unwrap();
+    record_run(&coverage, &program, host, "dynamic", &[]).unwrap();
+    let report = default_report(&coverage);
+    assert_functions(
+        &functions(file(&report, &library)),
+        &[
+            ("leaf1", 1, 1),
+            ("leaf2", 5, 1),
+            ("only_execs", 9, 0),
+            ("entry", 14, 0),
+            ("wrap", 18, 1),
+        ],
     );
 }
 

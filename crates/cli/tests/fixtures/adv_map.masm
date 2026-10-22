@@ -1,0 +1,5 @@
+adv_map A = [1]
+
+begin
+    push.1 drop
+end

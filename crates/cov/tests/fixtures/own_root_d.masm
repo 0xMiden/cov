@@ -1,0 +1,10 @@
+use fixtures::own_root_t
+
+pub proc leaf
+    push.1 drop
+end
+
+pub proc x
+    exec.own_root_t::target
+    push.3 drop
+end
