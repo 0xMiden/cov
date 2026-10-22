@@ -33,6 +33,7 @@ pub use collector::{Collector, CollectorOutput};
 pub use executor::CoverageExecutor;
 pub use format::{PackageFile, RunFile, RunOutcome};
 pub use hits::PackageHits;
-/// The engine types a driver of the collector names: the stepper and the
-/// record. The VM types a driver also needs come from `miden-processor`.
+/// The engine types a driver of the collector names: the stepper, the record
+/// and its node start. The VM types a driver also needs come from
+/// `miden-processor`.
 pub use miden_debug_engine::{CycleInfo, NodeStart, Stepper};

@@ -23,6 +23,7 @@ old one is marked superseded and links forward. Never delete a record.
 | [0015](0015-release-process-from-the-compiler.md) | Release process from the compiler, not the VM | accepted |
 | [0016](0016-aggregate-by-location.md) | Aggregate hits by location; count functions by their first instruction | accepted, refined by 0019 |
 | [0017](0017-record-node-starts-per-parent-edge.md) | Record node starts per parent edge | accepted, narrowed by 0019, mechanism superseded by 0018 |
-| [0018](0018-collect-through-the-debugger-engine.md) | Collect coverage through the debugger engine | accepted, consequences amended by 0020 |
+| [0018](0018-collect-through-the-debugger-engine.md) | Collect coverage through the debugger engine | accepted, consequences amended by 0020 and 0021 |
 | [0019](0019-function-entries-through-inlined-copies.md) | Count function entries through inlined copies | accepted |
 | [0020](0020-one-stepping-loop.md) | One stepping loop in the engine | accepted |
+| [0021](0021-guessed-source-nodes-count-nothing.md) | A guessed source node counts nothing; a touched package is always reported | accepted |

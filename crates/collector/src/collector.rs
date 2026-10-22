@@ -14,10 +14,12 @@ use crate::{
 
 /// Records hits for every forest an execution passes through.
 ///
+/// One collector serves one execution, from its first cycle to its end.
 /// Forests are identified by the address of their shared allocation, which is
-/// stable because the processor and the host hand out clones of the same
-/// `Arc`. The collector keeps a clone of each forest so the address cannot be
-/// reused while it is recording.
+/// stable because the processor keeps the forest it loaded for a procedure for
+/// the rest of the execution and hands out clones of that `Arc`. The collector
+/// keeps a clone of each forest so the address cannot be reused while it is
+/// recording.
 #[derive(Default)]
 pub struct Collector {
     /// The forests seen so far, keyed by the address of their allocation.
@@ -42,8 +44,9 @@ struct ForestEntry {
 /// Everything an execution produced, ready to be written to the coverage
 /// directory.
 pub struct CollectorOutput {
-    /// One entry per forest that carried debug info; forests without debug
-    /// info cannot be attributed to source and are dropped.
+    /// One entry per forest with debug info the execution passed through, hit
+    /// or not; forests without debug info cannot be attributed to source and
+    /// are dropped.
     pub packages: Vec<PackageFile>,
     /// The run with hits for the same packages.
     pub run: RunFile,
@@ -67,16 +70,25 @@ impl Collector {
     /// it. A node start counts for the node and for the edge from its parent;
     /// an operation counts for its row key, the source node and padded index.
     /// A record whose source node the engine inferred, because the processor
-    /// tracked none, counts as a cycle but hits nothing, except on the first
-    /// cycle of an execution.
+    /// tracked none, counts as a cycle and marks its package as touched but
+    /// hits nothing, except on the first cycle of an execution.
     pub fn on_cycle(&mut self, cycle: &CycleInfo<'_>) {
+        // A package is reported from the first record in its forest, hit or
+        // not, so that what ran without being attributed shows as uncovered
+        // rather than disappearing.
+        if cycle.debug_info.is_some() {
+            self.entry(cycle.forest, cycle.debug_info);
+        }
         // The processor tracks no source node for an invocation whose entry
-        // root it could not pick, and the engine then guesses the unique root
-        // of each node: a block that is also another procedure's root would
-        // be credited to that procedure although only the arm ran. Coverage
-        // may be lost there, never invented. The first cycle of an execution
-        // started from a bare program is inferred too, and exactly: the
-        // processor adopts that root when it installs the debug info.
+        // root it could not pick (and, when that invocation `call`s a
+        // procedure, none for the callee either), and the engine then guesses
+        // the unique root of each node: a block that is also another
+        // procedure's root would be credited to that procedure although only
+        // the arm ran. A guessed source node is never a hit: coverage may be
+        // lost there, never invented. The first record of an execution is
+        // exempt: it is inferred only for an execution started from a bare
+        // program, whose debug info the processor installs on that step,
+        // adopting the same root; a package-started first record is tracked.
         if cycle.source_node_inferred && self.cycles > 0 {
             self.cycles += 1;
             return;
@@ -104,9 +116,6 @@ impl Collector {
         let mut run_packages = Vec::new();
         for entry in self.forests.into_values() {
             let Some(debug_info) = entry.debug_info else { continue };
-            if entry.hits.is_empty() {
-                continue;
-            }
             packages.push(PackageFile {
                 commitment: entry.commitment,
                 forest: entry.forest,

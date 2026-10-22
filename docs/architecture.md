@@ -19,7 +19,10 @@ Coverage flows through four stages, each handing a plain artifact to the next.
    is never modified and there is no coverage build.
 2. **Collection.** The debugger engine steps the VM and resolves every cycle to
    source; the collector counts, from those records, which source nodes
-   started, from which parent, and which operations ran.
+   started, from which parent, and which operations ran. A cycle whose source
+   the engine could only guess counts nothing, and a package the execution
+   passed through is reported whether or not anything in it was attributed.
+   Invariant: coverage may be lost, never invented.
 3. **The coverage directory.** Each VM run ends as one run file holding its
    counts, and each package appears once with its forest and debug info. The
    directory is the only link between collecting and reporting.
@@ -38,9 +41,8 @@ processes or machines merge by landing in the same directory.
   asked for and can be attributed, that executor drives the engine's
   host-agnostic stepper with the host the test suite supplies, and otherwise
   hands the program to the processor's own executor and nothing changes. The
-  engine is
-  the only reader of the VM's continuation stream: the collector never
-  interprets continuations itself.
+  engine is the only reader of the VM's continuation stream: the collector
+  never interprets continuations itself.
 - **cov**: reads a coverage directory, merges runs, resolves source files,
   computes line, function, and branch coverage, and writes the output formats.
   It never executes anything.
@@ -116,11 +118,10 @@ This is the specification the collector and reporter implement together.
    inline call begins, and the edges into the tree a `call` node calls, when
    that tree's root belongs to one function across every package of the
    directory, records agreeing on file, line, and name being one function.
-   Invariant: the root start of a procedure entered through an external node
-   is never recorded, or the edges and the starts would both count the
-   entry. Its definition line is credited with
-   that count, because LCOV consumers reject a function record without a line
-   record.
+   The function's definition line is credited with that count, because LCOV
+   consumers reject a function record without a line record. Invariant: the
+   root start of a procedure entered through an external node is never
+   recorded, or the edges and the starts would both count the entry.
 7. Hits are counts. Any consumer that wants booleans truncates at output time.
 
 ## Branch semantics
