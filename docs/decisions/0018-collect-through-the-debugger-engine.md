@@ -2,7 +2,9 @@
 
 Status: accepted (2026-10-20). Supersedes 0002 and 0004, the observer
 sentence of 0003, the VM-pin consequence of 0011, and the forest-return
-mechanism of 0017; narrows 0005. Lands when the engine release that carries
+mechanism of 0017; narrows 0005. Consequences on the differential test and
+the debug executor amended by
+[0020](0020-one-stepping-loop.md). Lands when the engine release that carries
 the per-cycle hook is published; until then the branch builds against the
 engine's `cov-use-debug` branch, pinned by commit.
 
