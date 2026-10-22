@@ -66,7 +66,21 @@ impl Collector {
     /// Must be called once per step with the record the engine produced for
     /// it. A node start counts for the node and for the edge from its parent;
     /// an operation counts for its row key, the source node and padded index.
+    /// A record whose source node the engine inferred, because the processor
+    /// tracked none, counts as a cycle but hits nothing, except on the first
+    /// cycle of an execution.
     pub fn on_cycle(&mut self, cycle: &CycleInfo<'_>) {
+        // The processor tracks no source node for an invocation whose entry
+        // root it could not pick, and the engine then guesses the unique root
+        // of each node: a block that is also another procedure's root would
+        // be credited to that procedure although only the arm ran. Coverage
+        // may be lost there, never invented. The first cycle of an execution
+        // started from a bare program is inferred too, and exactly: the
+        // processor adopts that root when it installs the debug info.
+        if cycle.source_node_inferred && self.cycles > 0 {
+            self.cycles += 1;
+            return;
+        }
         if let Some(start) = cycle.node_start {
             let hits = &mut self.entry(cycle.forest, cycle.debug_info).hits;
             hits.record_node_start(start.node.into());
