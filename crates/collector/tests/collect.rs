@@ -538,26 +538,33 @@ fn a_failed_run_counts_the_failing_cycle() {
 }
 
 /// The path of the fixture `tests/fixtures/<name>.masm`.
+///
+/// A copy of `fixture` in the cov crate's `tests/common/mod.rs`: this crate
+/// cannot depend on the cov crate's test helpers.
 fn fixture_path(name: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join(format!("tests/fixtures/{name}.masm"))
 }
 
-/// A run through a dynamically linked library whose entry procedure's root is
-/// also the root of the procedure it wraps: the processor tracks no source
-/// node for the invocation, so its first cycle has none and the engine infers
-/// one for each of the others. The collector records no hit for those cycles
-/// but counts them, so the run's cycles still equal the clock at the end; a
-/// collector that skipped them would report fewer.
-#[test]
-fn inferred_cycles_count_toward_the_clock() {
+/// Parses `file` as the library module `path` with `source_manager`.
+///
+/// A copy of `library_module` in the cov crate's `tests/shapes.rs`, for the
+/// same reason as [`fixture_path`].
+fn library_module(
+    source_manager: &Arc<dyn SourceManager>,
+    path: &str,
+    file: &Path,
+) -> Box<miden_assembly::ast::Module> {
+    ModuleParser::new(Some(ModuleKind::Library))
+        .parse_file(Some(miden_assembly::Path::new(path)), file, source_manager.clone())
+        .unwrap()
+}
+
+/// Assembles the fixture `library` as the module `fixtures::infer` of a
+/// library, and `infer_program`, which links it dynamically. Returns the
+/// library, the program, and a host serving the library.
+fn infer_shape(library: &str) -> (Arc<Package>, Arc<Package>, DefaultHost) {
     let source_manager: Arc<dyn SourceManager> = Arc::new(DefaultSourceManager::default());
-    let module = ModuleParser::new(Some(ModuleKind::Library))
-        .parse_file(
-            Some(miden_assembly::Path::new("fixtures::infer")),
-            fixture_path("infer"),
-            source_manager.clone(),
-        )
-        .unwrap();
+    let module = library_module(&source_manager, "fixtures::infer", &fixture_path(library));
     let library: Arc<Package> = Arc::from(
         Assembler::new(source_manager.clone())
             .assemble_library("infer", module, Vec::<Box<miden_assembly::ast::Module>>::new())
@@ -571,6 +578,20 @@ fn inferred_cycles_count_toward_the_clock() {
             .unwrap(),
     );
     let host = DefaultHost::default().with_library(HostLibrary::from(library.clone())).unwrap();
+    (library, program, host)
+}
+
+/// A run through a dynamically linked library whose entry procedure's root is
+/// also the root of the procedure it wraps: the processor tracks no source
+/// node for the invocation. The root's `SPLIT` runs inside the step of the
+/// program's external node and is described in the program's forest; none of
+/// the library's own cycles is tracked, and the engine infers a source node
+/// for all but the last, the split's `END`. The collector records no hit for
+/// those cycles but counts them, so the run's cycles still equal the clock at
+/// the end; a collector that skipped them would report fewer.
+#[test]
+fn inferred_cycles_count_toward_the_clock() {
+    let (library, program, host) = infer_shape("infer");
     let (collector, result, clock) = run_with_clock(&program, &[], host);
     result.unwrap();
     assert_eq!(collector.cycles(), clock);
@@ -585,4 +606,70 @@ fn inferred_cycles_count_toward_the_clock() {
         .find(|(commitment, _)| *commitment == library.mast_forest_commitment())
         .expect("the library's package is reported");
     assert_eq!(*hits, PackageHits::default());
+}
+
+/// The `infer` shape with the then-arm failing: the run stops inside the arm,
+/// before the split's `END`, the only record of the library's forest that is
+/// not inferred. The library's package is still reported, with no hits, and
+/// written, so its lines show as uncovered. A collector that registered a
+/// package only from a record it does not skip as inferred would drop the
+/// library from both.
+#[test]
+fn a_package_whose_every_record_is_inferred_is_written() {
+    let (library, program, host) = infer_shape("infer_failing");
+    let (collector, result, clock) = run_with_clock(&program, &[], host);
+    let outcome = RunOutcome::of(&result);
+    assert!(matches!(outcome, RunOutcome::Failed(_)), "{outcome:?}");
+    let output = collector.finish("all inferred".into(), outcome);
+    assert_eq!(output.run.cycles, clock + 1);
+    let (_, hits) = output
+        .run
+        .packages
+        .iter()
+        .find(|(commitment, _)| *commitment == library.mast_forest_commitment())
+        .expect("the library's package is reported");
+    assert_eq!(*hits, PackageHits::default());
+    assert!(
+        output
+            .packages
+            .iter()
+            .any(|package| package.commitment == library.mast_forest_commitment()),
+        "the library's package is written"
+    );
+}
+
+/// A dynamically linked library whose debug info was stripped, called from a
+/// program that has debug info. The cycles in the library's forest cannot be
+/// attributed, so no package is written for it, but they count: the run's
+/// cycles equal the clock. A collector that counted only the cycles of
+/// forests with debug info would report fewer, and one that kept such a
+/// forest would write a second package.
+#[test]
+fn a_cycle_without_debug_info_counts_and_writes_no_package() {
+    let mut library = Assembler::default()
+        .assemble_library(
+            "stripped",
+            "namespace stripped::m pub proc target push.1 push.2 add drop end",
+            None::<String>,
+        )
+        .unwrap();
+    library.strip_debug_info().unwrap();
+    let library: Arc<Package> = Arc::from(library);
+    let program: Arc<Package> = Arc::from(
+        Assembler::default()
+            .with_package(library.clone(), Linkage::Dynamic)
+            .unwrap()
+            .assemble_program("program", "use stripped::m begin call.m::target end")
+            .unwrap(),
+    );
+    assert!(program.debug_info().unwrap().is_some());
+    let host = DefaultHost::default().with_library(HostLibrary::from(library)).unwrap();
+    let (collector, result, clock) = run_with_clock(&program, &[], host);
+    result.unwrap();
+    let output = collector.finish("stripped".into(), RunOutcome::Ok);
+    assert_eq!(output.run.cycles, clock);
+    assert_eq!(output.packages.len(), 1);
+    assert_eq!(output.packages[0].commitment, program.mast_forest_commitment());
+    assert_eq!(output.run.packages.len(), 1);
+    assert_eq!(output.run.packages[0].0, program.mast_forest_commitment());
 }

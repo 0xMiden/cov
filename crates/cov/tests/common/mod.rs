@@ -17,7 +17,10 @@ use miden_cov::{
     build_report,
 };
 use miden_cov_collector::{Collector, RunOutcome, Stepper, dir::CoverageDir};
-use miden_mast_package::Package;
+use miden_mast_package::{
+    Package,
+    debug_info::{DebugSourceNodeId, FunctionInfo, PackageDebugInfo},
+};
 use miden_processor::{DefaultHost, ExecutionError, FastProcessor, StackInputs};
 
 /// The path of the fixture `tests/fixtures/<name>.masm`.
@@ -199,6 +202,23 @@ pub fn assert_functions(functions: &[(&str, u32, u64)], expected: &[(&str, u32, 
         assert!(name.ends_with(suffix), "{name} should end with {suffix}");
         assert_eq!((*line, *count), (*expected_line, *expected_count), "{name}");
     }
+}
+
+/// The function records of `debug_info` whose name ends with `suffix`, in
+/// table order.
+pub fn records_named<'a>(
+    debug_info: &'a PackageDebugInfo,
+    suffix: &str,
+) -> Vec<&'a FunctionInfo<DebugSourceNodeId>> {
+    debug_info
+        .functions()
+        .iter()
+        .filter(|function| {
+            debug_info
+                .get_string(function.name_idx)
+                .is_some_and(|name| name.ends_with(suffix))
+        })
+        .collect()
 }
 
 /// The branches of `file` as `(line, executed, arms)`.

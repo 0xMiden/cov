@@ -1,3 +1,4 @@
+# Apart from this line, a copy of crates/cov/tests/fixtures/infer_program.masm.
 use fixtures::infer
 
 begin

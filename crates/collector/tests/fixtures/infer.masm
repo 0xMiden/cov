@@ -1,3 +1,4 @@
+# Apart from this line, a copy of crates/cov/tests/fixtures/infer.masm.
 pub proc x
     push.1 drop
 end

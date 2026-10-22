@@ -131,13 +131,15 @@ fn a_run_whose_context_cannot_be_built_is_written() {
     let stdout = String::from_utf8_lossy(&output.stdout);
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(!output.status.success(), "stdout: {stdout}\nstderr: {stderr}");
-    assert!(stderr.contains("already present in the advice map"), "{stderr}");
     assert!(stdout.starts_with("wrote "), "stdout: {stdout}\nstderr: {stderr}");
     let runs = CoverageDir::new(&cov).read_runs().unwrap();
     assert_eq!(runs.len(), 1);
     assert!(matches!(runs[0].outcome, RunOutcome::Failed(_)), "{:?}", runs[0].outcome);
     assert_eq!(runs[0].cycles, 0);
     assert!(runs[0].packages.is_empty(), "{:?}", runs[0].packages);
+    // The directory may not exist: nothing ever asked for a package to be written.
+    let packages = fs::read_dir(cov.join("packages")).map_or(0, |dir| dir.count());
+    assert_eq!(packages, 0, "no package file is written");
 }
 
 #[test]

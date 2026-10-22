@@ -11,7 +11,7 @@ use std::{collections::BTreeMap, fs, path::Path, sync::Arc};
 
 use common::{
     assemble_program, assert_functions, branches, default_report, file, fixture, functions,
-    only_file, record_run, record_runs, report,
+    only_file, record_run, record_runs, records_named, report,
 };
 use miden_assembly::{
     Assembler, DefaultSourceManager, Linkage, ModuleParser, SourceManager, ast::ModuleKind,
@@ -408,15 +408,7 @@ fn reexported_procedures_count_once() {
         )
         .unwrap();
     let debug_info = package.debug_info().unwrap().unwrap();
-    let records = debug_info
-        .functions()
-        .iter()
-        .filter(|function| {
-            debug_info
-                .get_string(function.name_idx)
-                .is_some_and(|name| name.ends_with("::only_execs"))
-        })
-        .count();
+    let records = records_named(&debug_info, "::only_execs").len();
     assert_eq!(records, 2, "the re-export is recorded a second time");
     let entrypoint: QualifiedProcedureName = "fixtures::reexport_root::entry".parse().unwrap();
     let package = Arc::new(package.make_executable(&entrypoint).unwrap());
@@ -559,10 +551,12 @@ fn a_dynamic_library_both_executed_and_called() {
 /// source root and tracks no source node below it, and the engine then
 /// guesses each node's unique root. The then-arm of `body` compiles to the
 /// same block as `x`'s body, so a guess would credit `x`, which never ran.
-/// The collector records nothing of the invocation instead: coverage below
-/// the entry is lost (the gap 0018 records), never invented. `entry` itself
-/// is counted from the caller's side, where the external node that enters
-/// it is tracked.
+/// The collector instead registers the library's package and records no hit
+/// for the invocation, so the library's lines show as uncovered: coverage
+/// below the entry is lost (the gap 0018 records), never invented. `entry`
+/// itself is counted from the caller's side, through the inline entry of the
+/// external node, which does not look up the identities behind the root;
+/// only a `call` does.
 #[test]
 fn an_invocation_without_tracked_source_nodes_credits_nothing() {
     let (_tmp, coverage) = coverage_dir();
@@ -748,14 +742,8 @@ fn an_own_root_after_an_imported_record_counts_its_starts() {
     // The shape under test: the imported record of `target` precedes the
     // program's own, under the same MAST root.
     let debug_info = program.debug_info().unwrap().unwrap();
-    let records: Vec<_> = debug_info
-        .functions()
-        .iter()
-        .filter(|function| {
-            debug_info
-                .get_string(function.name_idx)
-                .is_some_and(|name| name.ends_with("::target"))
-        })
+    let records: Vec<_> = records_named(&debug_info, "::target")
+        .into_iter()
         .map(|function| (function.source_node.into_option().is_some(), function.mast_root))
         .collect();
     assert_eq!(records.len(), 2, "{records:?}");
@@ -803,14 +791,16 @@ fn a_root_shared_only_across_packages_is_not_credited() {
 /// `entry` put two functions behind the root across the directory, so
 /// neither `call` is credited and both report 0.
 ///
-/// The true counts are 1 and 1. They are withheld rather than guessed: the
-/// written package of the untracked invocation is what adds the ambiguity,
-/// since the identities behind a root are drawn from every written package,
-/// hit or not, and restricting them to packages with hits was considered and
-/// not done. A collector that wrote only packages with hits would drop the
-/// library, leave the static program's record of `only_execs` the only
-/// identity behind the root, and credit it with both `call`s, reporting
-/// `only_execs` as 2 and `entry`, recorded nowhere else, not at all.
+/// The true counts are 2 and 1: `entry`'s body is an inlined copy of
+/// `only_execs`, so `call.entry` is also an entry of `only_execs` under rule
+/// 6. They are withheld rather than guessed: the written package of the
+/// untracked invocation is what adds the ambiguity, since the identities
+/// behind a root are drawn from every written package, hit or not, and
+/// restricting them to packages with hits was considered and not done. A
+/// collector that wrote only packages with hits would drop the library, leave
+/// the static program's record of `only_execs` the only identity behind the
+/// root, and credit it with both `call`s, reporting `only_execs` as 2 and
+/// `entry`, recorded nowhere else, not at all.
 #[test]
 fn a_package_touched_only_untracked_adds_its_identities() {
     let (_tmp, coverage) = coverage_dir();
@@ -839,6 +829,11 @@ fn a_package_touched_only_untracked_adds_its_identities() {
     let host = DefaultHost::default().with_library(HostLibrary::from(dynamic)).unwrap();
     record_run(&coverage, &program, host, "dynamic", &[]).unwrap();
     let report = default_report(&coverage);
+    // `leaf1` and `leaf2` undercount: the dynamic `call.untracked_lib::entry`
+    // runs them once more, but the processor tracks no source node for the
+    // invocation (the VM gap 0018 records), so none of its rows is counted.
+    // When that gap closes they become 2, the true count; raising them is the
+    // fix, not a regression to undo.
     assert_functions(
         &functions(file(&report, &library)),
         &[
