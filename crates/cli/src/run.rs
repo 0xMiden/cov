@@ -96,13 +96,19 @@ pub fn run(args: RunArgs) -> anyhow::Result<()> {
     .map_err(from_report)
     .context("failed to load link libraries")?;
     let source_manager: Arc<dyn SourceManager> = Arc::new(DefaultSourceManager::default());
-    let (mut stepper, mut host) = Executor::from_config(args.inputs.unwrap_or_default())
-        .with_registry(registry)
-        .into_stepper(package, source_manager);
-
-    // The engine describes each cycle to the collector before executing it.
     let mut collector = Collector::new();
-    let result = stepper.run_sync(&mut host, |cycle| collector.on_cycle(cycle));
+    let result = match Executor::from_config(args.inputs.unwrap_or_default())
+        .with_registry(registry)
+        .into_stepper(package, source_manager)
+    {
+        // The engine describes each cycle to the collector before executing it.
+        Ok((mut stepper, mut host)) => {
+            stepper.run_sync(&mut host, |cycle| collector.on_cycle(cycle))
+        },
+        // A context that cannot be built is an execution that failed before
+        // its first cycle; it is written like any other.
+        Err(error) => Err(error),
+    };
 
     let name = args.name.unwrap_or_else(|| default_run_name(&args.package));
     let output = collector.finish(name, RunOutcome::of(&result));
