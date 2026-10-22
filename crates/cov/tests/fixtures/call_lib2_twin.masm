@@ -1,0 +1,6 @@
+use fixtures::lib2_twin
+
+begin
+    exec.lib2_twin::calls
+    push.4 drop
+end

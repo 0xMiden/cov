@@ -308,6 +308,11 @@ fn coverage_executor_child_with_directory() {
     // processor's own executor, which rejects a node that is not the entry's,
     // and nothing is written.
     let other = DebugSourceNodeId::from(if u32::from(root) == 0 { 1 } else { 0 });
+    assert_ne!(
+        debug_info.source_node(other).unwrap().exec_node,
+        package.unwrap_program().entrypoint(),
+        "source node {other:?} must stand for another exec node than the entry point",
+    );
     let ours = execute(&package, 1, 3, Some(other)).unwrap_err().to_string();
     let theirs = expected_output(&package, 1, 3, Some(other)).unwrap_err().to_string();
     assert_eq!(ours, theirs);

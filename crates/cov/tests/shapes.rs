@@ -67,6 +67,20 @@ fn core_host() -> DefaultHost {
         .unwrap()
 }
 
+/// The one file of `report` that is `source`, whichever stored path it was
+/// found through.
+fn only_copy<'a>(report: &'a miden_cov::Report, source: &Path) -> &'a FileCoverage {
+    let copies: Vec<&FileCoverage> = report
+        .files
+        .values()
+        .filter(|file| fs::canonicalize(&file.path).unwrap() == source)
+        .collect();
+    let [file] = copies.as_slice() else {
+        panic!("{} is reported {} times", source.display(), copies.len());
+    };
+    file
+}
+
 /// The lines of `file` in `range`.
 fn lines_in(file: &FileCoverage, range: std::ops::RangeInclusive<u32>) -> BTreeMap<u32, u64> {
     file.lines.range(range).map(|(line, count)| (*line, *count)).collect()
@@ -213,9 +227,11 @@ fn body_starts_with_control_flow() {
     assert_eq!(branches(file), [(2, true, [2, 1]), (11, true, [4, 3])]);
 }
 
-/// Branch arms and a loop body that consist of a bare `exec`: each arm is
-/// its own copy of the callee's tree, so the counts come out right from the
-/// copies as well as from the edges the collector records.
+/// Branch arms and a loop body that consist of a bare `exec` of a procedure
+/// with a branch of its own, each procedure also called directly. Every arm
+/// is its own copy of the callee's tree; this pins that the callee's line,
+/// function, and branch counts summed over its copies agree with the arm
+/// counts the edges the collector records give.
 #[test]
 fn arms_that_are_procedure_calls() {
     let (_tmp, coverage) = coverage_dir();
@@ -333,10 +349,17 @@ fn procedures_reached_by_exec_and_call() {
 /// The entry of a dynamically linked library whose body compiles to the same
 /// MAST as another procedure of the library: the processor cannot pick the
 /// entry's source root and tracks no source nodes for the invocation, so
-/// everything below the entry reports zero. A VM gap recorded in 0018; the
-/// expectations here are the correct ones, for when it closes.
+/// everything below the entry reports zero. A VM gap recorded in 0018.
+///
+/// The expectations also depend on the deferred follow-up for a root that is
+/// a split: the entry's root is the `if.true` of `leaf`, inlined twice, and
+/// it is entered through the program's external node, whose root start the
+/// collector never sees, so the condition row is not counted either. A
+/// failure may come from either gap; the expectations here are the correct
+/// ones, for when both close.
 #[test]
-#[ignore = "VM gap (0018): ambiguous source root of a dynamically linked entry procedure"]
+#[ignore = "VM gap (0018): ambiguous source root of a dynamically linked entry procedure; also \
+            needs the deferred follow-up for an `if.true` root entered through an external node"]
 fn dynamic_library_entry_sharing_a_body() {
     let (_tmp, coverage) = coverage_dir();
     let library = fixture("ambiguous_entry_lib");
@@ -458,8 +481,10 @@ fn two_programs_sharing_a_library() {
 /// `exec` imports the library's whole function table into the program, so
 /// the callee's root is recorded in both packages; the records agree, and
 /// the `call` is credited through the program's own record. A second program
-/// in the same directory that only `call`s the procedure has no record of it
-/// and is credited through the library's.
+/// in the same directory that only `call`s the procedure has no record of it,
+/// so its `call` is credited to the first record of the function in package
+/// commitment order, here the first program's imported one; any record would
+/// do, since all of them are tallied as one function.
 #[test]
 fn a_dynamic_library_both_executed_and_called() {
     let (_tmp, coverage) = coverage_dir();
@@ -519,6 +544,47 @@ fn a_dynamic_library_both_executed_and_called() {
     );
 }
 
+/// A dynamically linked library whose entry procedure's root is also the
+/// root of the procedure it wraps: the processor cannot pick the entry's
+/// source root and tracks no source node below it, and the engine then
+/// guesses each node's unique root. The then-arm of `body` compiles to the
+/// same block as `x`'s body, so a guess would credit `x`, which never ran.
+/// The collector records nothing of the invocation instead: coverage below
+/// the entry is lost (the gap 0018 records), never invented. `entry` itself
+/// is counted from the caller's side, where the external node that enters
+/// it is tracked.
+#[test]
+fn an_invocation_without_tracked_source_nodes_credits_nothing() {
+    let (_tmp, coverage) = coverage_dir();
+    let library = fixture("infer");
+    let source_manager: Arc<dyn SourceManager> = Arc::new(DefaultSourceManager::default());
+    let dynamic: Arc<Package> = Arc::from(
+        Assembler::new(source_manager.clone())
+            .assemble_library(
+                "infer",
+                library_module(&source_manager, "fixtures::infer", &library),
+                Vec::<Box<miden_assembly::ast::Module>>::new(),
+            )
+            .unwrap(),
+    );
+    let program = Arc::from(
+        Assembler::new(source_manager)
+            .with_package(dynamic.clone(), Linkage::Dynamic)
+            .unwrap()
+            .assemble_program("program", fixture("infer_program"))
+            .unwrap(),
+    );
+    let host = DefaultHost::default().with_library(HostLibrary::from(dynamic)).unwrap();
+    record_run(&coverage, &program, host, "dynamic", &[]).unwrap();
+    let report = default_report(&coverage);
+    // The program imports the library's function table, so the file is
+    // reported; `x` in particular is not credited.
+    assert_functions(
+        &functions(file(&report, &library)),
+        &[("x", 1, 0), ("body", 5, 0), ("entry", 13, 1)],
+    );
+}
+
 /// A root that two procedures of a library share, seen from two programs: one
 /// links the library statically and runs the first procedure, the other links
 /// it dynamically, which imports every record, and `call`s the second. The
@@ -552,6 +618,12 @@ fn a_root_shared_across_packages_is_not_credited() {
     record_run(&coverage, &program, host, "dynamic", &[]).unwrap();
     let report = default_report(&coverage);
     let file = file(&report, &library);
+    // `inner1` and `inner2` undercount: the dynamic `call.amb::wrapper` runs
+    // `leaf`'s body once more, but the processor cannot pick between the two
+    // source roots of the shared exec node and tracks no source node for the
+    // invocation (the VM gap 0018 records), so none of its rows is counted.
+    // When that gap closes they become 2, the true count; raising them is
+    // the fix, not a regression to undo.
     assert_functions(
         &functions(file),
         &[
@@ -561,6 +633,79 @@ fn a_root_shared_across_packages_is_not_credited() {
             ("wrapper", 14, 0),
             ("other", 18, 1),
         ],
+    );
+}
+
+/// A library linked into two programs under two stored paths of one file,
+/// each program reaching `only_execs`, which has no row of its own, through a
+/// `call` inside the inlined copy of `wrap`. The two records are one function
+/// because they agree on the file as the report resolves it; a lookup keyed
+/// by the stored path would see two functions behind one root and credit
+/// neither `call`.
+#[test]
+fn a_callee_under_two_paths_is_one_function() {
+    let (_tmp, coverage) = coverage_dir();
+    let library = fixture("lib2");
+    let absolute = assemble_with_module(&fixture("two_programs_a"), "fixtures::lib2", &library);
+    let relative = assemble_with_module(
+        &fixture("two_programs_b"),
+        "fixtures::lib2",
+        Path::new("tests/../tests/fixtures/lib2.masm"),
+    );
+    record_runs(&coverage, &absolute, &[&[]]);
+    record_runs(&coverage, &relative, &[&[]]);
+    let report = default_report(&coverage);
+    assert!(report.unresolved.is_empty(), "{:?}", report.unresolved);
+    assert_functions(
+        &functions(only_copy(&report, &library)),
+        &[("leaf1", 1, 2), ("leaf2", 5, 2), ("only_execs", 9, 2), ("wrap", 14, 2)],
+    );
+}
+
+/// Two programs linking one library statically, each `call`ing `only_execs`
+/// from `begin`: the child of every `call` is the procedure's own root in the
+/// caller's package, whose starts count the calls. A lookup that credited the
+/// edges to the first package's record rather than the caller's own would not
+/// recognize the root in the other package and count that package's calls
+/// twice, once by the starts and once by the edges.
+#[test]
+fn an_own_root_called_from_two_programs_counts_its_starts() {
+    let (_tmp, coverage) = coverage_dir();
+    let library = fixture("lib2");
+    for program in ["call_lib2", "call_lib2_twice"] {
+        let package = assemble_with_module(&fixture(program), "fixtures::lib2", &library);
+        record_runs(&coverage, &package, &[&[]]);
+    }
+    let report = default_report(&coverage);
+    assert_functions(
+        &functions(file(&report, &library)),
+        &[("leaf1", 1, 3), ("leaf2", 5, 3), ("only_execs", 9, 3)],
+    );
+}
+
+/// Two libraries in two files whose `only_execs` and `execs` compile to the
+/// same MAST, each reached through a `call` inside an inlined copy from a
+/// program linking only that library. Each package records one function
+/// behind the root and the directory two, so the root is ambiguous and
+/// neither is credited. A lookup that took the first function of an
+/// ambiguous root would credit both programs' `call`s to it.
+#[test]
+fn a_root_shared_only_across_packages_is_not_credited() {
+    let (_tmp, coverage) = coverage_dir();
+    let library = fixture("lib2");
+    let twin = fixture("lib2_twin");
+    let package = assemble_with_module(&fixture("two_programs_a"), "fixtures::lib2", &library);
+    record_runs(&coverage, &package, &[&[]]);
+    let package = assemble_with_module(&fixture("call_lib2_twin"), "fixtures::lib2_twin", &twin);
+    record_runs(&coverage, &package, &[&[]]);
+    let report = default_report(&coverage);
+    assert_functions(
+        &functions(file(&report, &library)),
+        &[("leaf1", 1, 1), ("leaf2", 5, 1), ("only_execs", 9, 0), ("wrap", 14, 1)],
+    );
+    assert_functions(
+        &functions(file(&report, &twin)),
+        &[("first", 1, 1), ("second", 5, 1), ("execs", 9, 0), ("calls", 14, 1)],
     );
 }
 
@@ -905,14 +1050,7 @@ fn one_file_under_two_paths() {
     let report = default_report(&coverage);
     assert!(report.unresolved.is_empty(), "{:?}", report.unresolved);
     assert_eq!(report.files.len(), 3, "{:?}", report.files.keys());
-    let copies: Vec<&FileCoverage> = report
-        .files
-        .values()
-        .filter(|file| fs::canonicalize(&file.path).unwrap() == library)
-        .collect();
-    let [lib] = copies.as_slice() else {
-        panic!("{} is reported {} times", library.display(), copies.len());
-    };
+    let lib = only_copy(&report, &library);
 
     assert_eq!(
         lib.lines,
@@ -922,14 +1060,14 @@ fn one_file_under_two_paths() {
     assert_eq!(branches(lib), [(2, true, [2, 0]), (11, true, [1, 3])]);
 }
 
-/// Arms that are bare procedure calls, where the procedures are also arms
-/// of another `if` and are called directly. Each arm is a copy of its own
-/// here, and the arm counts come out the same from the copies as from the
-/// parent-to-child edges the collector records, which are what tells arms
-/// apart when the callee is not copied. The loop body is a bare call to
-/// `c`, which is also called directly.
+/// Procedures that are bare-`exec` arms of two different `if`s, `a` and `b`
+/// in both `pick` and `pick2`, and `c`, the bare-`exec` body of a loop; `b`
+/// and `c` are also called directly. Every arm and the loop body is a copy of
+/// its own; this pins that each procedure's count summed over its copies
+/// agrees with the arm counts the parent-to-child edges give, which are what
+/// tell arms apart when the callee is not copied.
 #[test]
-fn shared_arms_in_two_splits_and_a_loop() {
+fn procedures_in_arms_of_two_splits_and_a_loop_body() {
     let (_tmp, coverage) = coverage_dir();
     let source = fixture("shared_arms_twice");
     record_runs(&coverage, &assemble_program(&source), &[&[]]);
