@@ -2,13 +2,16 @@
 //! raw hits, the coverage directory round trip, and the program executor.
 
 use std::{
+    path::{Path, PathBuf},
     pin::pin,
     process::Command,
     sync::Arc,
     task::{Context, Poll, Waker},
 };
 
-use miden_assembly::Assembler;
+use miden_assembly::{
+    Assembler, DefaultSourceManager, Linkage, ModuleParser, SourceManager, ast::ModuleKind,
+};
 use miden_core::{Felt, mast::MastNode};
 use miden_cov_collector::{
     Collector, CoverageExecutor, PackageHits, RunOutcome, Stepper,
@@ -16,8 +19,8 @@ use miden_cov_collector::{
 };
 use miden_mast_package::{Package, QualifiedProcedureName, debug_info::DebugSourceNodeId};
 use miden_processor::{
-    DefaultHost, ExecutionError, ExecutionOptions, ExecutionOutput, FastProcessor, ProgramExecutor,
-    StackInputs, advice::AdviceInputs,
+    DefaultHost, ExecutionError, ExecutionOptions, ExecutionOutput, FastProcessor, HostLibrary,
+    ProgramExecutor, StackInputs, advice::AdviceInputs,
 };
 
 /// Two procedures, an if/else, and a loop guarded by the split the assembler
@@ -500,20 +503,95 @@ fn coverage_executor_writes_one_run_per_execution() {
     assert_eq!(std::fs::read_dir(empty.path()).unwrap().count(), 0);
 }
 
+/// Runs `package` on `stack` (first element on top) with `host` under a
+/// collector and returns the collector, the outcome, and the VM clock at the
+/// end.
+fn run_with_clock(
+    package: &Arc<Package>,
+    stack: &[u64],
+    mut host: DefaultHost,
+) -> (Collector, Result<(), ExecutionError>, u64) {
+    let stack: Vec<Felt> = stack.iter().map(|value| Felt::new(*value).unwrap()).collect();
+    let processor = FastProcessor::new(StackInputs::new(&stack).unwrap());
+    let mut stepper = Stepper::for_package(processor, package.clone()).unwrap();
+    let mut collector = Collector::new();
+    let result = stepper.run_sync(&mut host, |cycle| collector.on_cycle(cycle));
+    let clock = u64::from(u32::from(stepper.processor().state().clock()));
+    (collector, result, clock)
+}
+
 /// The collector counts one record per VM cycle: the finalization step after
 /// the last cycle adds none.
 #[test]
 fn cycles_match_the_vm_clock() {
-    let package = fixture();
-    let processor = FastProcessor::new(
-        StackInputs::new(&[Felt::new(1).unwrap(), Felt::new(3).unwrap()]).unwrap(),
-    );
-    let mut stepper = Stepper::for_package(processor, package.clone()).unwrap();
-    let mut collector = Collector::new();
-    stepper
-        .run_sync(&mut DefaultHost::default(), |cycle| collector.on_cycle(cycle))
-        .unwrap();
-    let clock = u64::from(u32::from(stepper.processor().state().clock()));
+    let (collector, result, clock) = run_with_clock(&fixture(), &[1, 3], DefaultHost::default());
+    result.unwrap();
     assert_eq!(collector.cycles(), clock);
     assert_eq!(collector.finish("clock".into(), RunOutcome::Ok).run.cycles, clock);
+}
+
+/// A run that fails on an operation counts the failing cycle, which the VM
+/// clock does not: the engine hands the cycle's record to the collector
+/// before the cycle runs, so the run's cycles are the clock plus one.
+#[test]
+fn a_failed_run_counts_the_failing_cycle() {
+    let package: Arc<Package> = Arc::from(
+        Assembler::default()
+            .assemble_program("failing", "begin push.1 drop push.0 assert end")
+            .unwrap(),
+    );
+    let (collector, result, clock) = run_with_clock(&package, &[], DefaultHost::default());
+    let outcome = RunOutcome::of(&result);
+    assert!(matches!(outcome, RunOutcome::Failed(_)), "{outcome:?}");
+    assert_eq!(collector.cycles(), clock + 1);
+    assert_eq!(collector.finish("failed".into(), outcome).run.cycles, clock + 1);
+}
+
+/// The path of the reporter's fixture `<name>.masm`.
+fn cov_fixture(name: &str) -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join(format!("../cov/tests/fixtures/{name}.masm"))
+}
+
+/// A run through a dynamically linked library whose entry procedure's root is
+/// also the root of the procedure it wraps: the processor tracks no source
+/// node for the invocation and the engine infers one for each of its cycles.
+/// The collector records no hit for those cycles but counts them, so the
+/// run's cycles still equal the clock at the end.
+#[test]
+fn inferred_cycles_count_toward_the_clock() {
+    let source_manager: Arc<dyn SourceManager> = Arc::new(DefaultSourceManager::default());
+    let module = ModuleParser::new(Some(ModuleKind::Library))
+        .parse_file(
+            Some(miden_assembly::Path::new("fixtures::infer")),
+            cov_fixture("infer"),
+            source_manager.clone(),
+        )
+        .unwrap();
+    let library: Arc<Package> = Arc::from(
+        Assembler::new(source_manager.clone())
+            .assemble_library("infer", module, Vec::<Box<miden_assembly::ast::Module>>::new())
+            .unwrap(),
+    );
+    let program: Arc<Package> = Arc::from(
+        Assembler::new(source_manager)
+            .with_package(library.clone(), Linkage::Dynamic)
+            .unwrap()
+            .assemble_program("program", cov_fixture("infer_program"))
+            .unwrap(),
+    );
+    let host = DefaultHost::default().with_library(HostLibrary::from(library.clone())).unwrap();
+    let (collector, result, clock) = run_with_clock(&program, &[], host);
+    result.unwrap();
+    assert_eq!(collector.cycles(), clock);
+    let output = collector.finish("inferred".into(), RunOutcome::Ok);
+    assert_eq!(output.run.cycles, clock);
+    // The library ran but nothing was recorded against it: every one of its
+    // cycles was inferred.
+    let (_, hits) = output
+        .run
+        .packages
+        .iter()
+        .find(|(commitment, _)| *commitment == library.mast_forest_commitment())
+        .expect("the library's package is reported");
+    assert_eq!(*hits, PackageHits::default());
 }

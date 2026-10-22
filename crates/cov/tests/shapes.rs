@@ -457,23 +457,33 @@ fn a_shared_root_is_not_credited() {
     );
 }
 
-/// Two programs linking one library statically, in one coverage directory:
-/// the library's records appear in both packages and agree, so a `call` in
-/// each credits the callee, and the counts add up across the two runs. The
-/// unused `other` is not linked in.
+/// A function with a row of its own is counted by that row, not by its root,
+/// its copies, and the `call`s to it, and rows of a procedure inlined into
+/// its body are not its own. `b` and `c` compile to the same MAST, so the
+/// `call.b` inside `w`'s copy is not credited to either: `b`'s root, copies,
+/// and `call`s count 0. Its first own row, `push.2` on line 7, runs once,
+/// through the clone of `b`'s tree under the `call`. The body begins with the
+/// inlined `push.1` of `a`, whose location runs twice, once in that clone and
+/// once in `c`'s copy.
+///
+/// Counting every function by its root, copies, and `call`s would report `b`
+/// as 0. Taking the first row of any procedure as the entry would report `b`
+/// and `c` as 2, the count of `a`'s row; taking no row as the function's own
+/// sends `b` to the same 0 as the root count.
 #[test]
-fn two_programs_sharing_a_library() {
+fn a_function_is_counted_by_its_first_own_row_not_its_root_or_callee() {
     let (_tmp, coverage) = coverage_dir();
-    let library = fixture("lib2");
-    for program in ["two_programs_a", "two_programs_b"] {
-        let package = assemble_with_module(&fixture(program), "fixtures::lib2", &library);
-        record_runs(&coverage, &package, &[&[]]);
-    }
+    let source = fixture("own_row_in_shared_body");
+    record_runs(&coverage, &assemble_program(&source), &[&[]]);
     let report = default_report(&coverage);
-    let file = file(&report, &library);
+    let file = only_file(&report, &source);
+    assert_eq!(
+        file.lines,
+        BTreeMap::from([(1, 2), (2, 2), (5, 1), (7, 1), (10, 1), (12, 1), (15, 1), (19, 1)])
+    );
     assert_functions(
         &functions(file),
-        &[("leaf1", 1, 2), ("leaf2", 5, 2), ("only_execs", 9, 2), ("wrap", 14, 2)],
+        &[("a", 1, 2), ("b", 5, 1), ("c", 10, 1), ("w", 15, 1), ("$main", 19, 1)],
     );
 }
 
@@ -483,8 +493,8 @@ fn two_programs_sharing_a_library() {
 /// the `call` is credited through the program's own record. A second program
 /// in the same directory that only `call`s the procedure has no record of it,
 /// so its `call` is credited to the first record of the function in package
-/// commitment order, here the first program's imported one; any record would
-/// do, since all of them are tallied as one function.
+/// commitment order, whichever record sorts first by commitment; any record
+/// would do, since all of them are tallied as one function.
 #[test]
 fn a_dynamic_library_both_executed_and_called() {
     let (_tmp, coverage) = coverage_dir();
@@ -577,21 +587,33 @@ fn an_invocation_without_tracked_source_nodes_credits_nothing() {
     let host = DefaultHost::default().with_library(HostLibrary::from(dynamic)).unwrap();
     record_run(&coverage, &program, host, "dynamic", &[]).unwrap();
     let report = default_report(&coverage);
-    // The program imports the library's function table, so the file is
-    // reported; `x` in particular is not credited.
-    assert_functions(
-        &functions(file(&report, &library)),
-        &[("x", 1, 0), ("body", 5, 0), ("entry", 13, 1)],
+    // The library's package is written though none of its rows was hit, so
+    // its lines are reported with 0: the definition lines of `x` (1) and
+    // `body` (5), the rows of `x` (2) and of both arms (7, 9), and the
+    // condition (6). `entry` (13) is credited from the program's side.
+    let file = file(&report, &library);
+    assert_eq!(
+        file.lines,
+        BTreeMap::from([(1, 0), (2, 0), (5, 0), (6, 0), (7, 0), (9, 0), (13, 1)])
     );
+    // `x` in particular is not credited. `body` reports 0 for a second
+    // reason too: its root is the `if.true`, entered through the program's
+    // external node, whose root start the collector never sees (the deferred
+    // follow-up for a split root). Its true count is 1; raising it once both
+    // gaps close is the fix, not a regression to undo.
+    assert_functions(&functions(file), &[("x", 1, 0), ("body", 5, 0), ("entry", 13, 1)]);
 }
 
-/// A root that two procedures of a library share, seen from two programs: one
-/// links the library statically and runs the first procedure, the other links
-/// it dynamically, which imports every record, and `call`s the second. The
-/// root is ambiguous across the directory, so the `call` is not credited to
-/// either, and the first procedure keeps the count of its own run.
+/// A root that two procedures of a library share, `leaf` and `wrapper`, whose
+/// body is one `exec` of `leaf`. A program linking the library dynamically
+/// `exec`s `other`, which imports the library's whole function table, so the
+/// program's own package records both procedures behind the root, and its
+/// `call` of `wrapper` is credited to neither. A second program links the
+/// library statically and runs `leaf`, which keeps the count of that run. The
+/// ambiguity is visible in the calling package alone; the case where only the
+/// directory as a whole sees it is `a_root_shared_only_across_packages_is_not_credited`.
 #[test]
-fn a_root_shared_across_packages_is_not_credited() {
+fn a_root_shared_in_an_imported_table_is_not_credited() {
     let (_tmp, coverage) = coverage_dir();
     let library = fixture("amb");
     let package = assemble_with_module(&fixture("amb_static"), "fixtures::amb", &library);
