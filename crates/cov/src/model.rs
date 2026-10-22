@@ -108,7 +108,7 @@ pub fn build_report(
     // Functions by file, line, and name, each listed once per package that
     // contains it. The count is known only once every package is tallied,
     // because a body may run through another package's copy of it.
-    let mut functions: BTreeMap<(Arc<str>, u32, String), FunctionTally> = BTreeMap::new();
+    let mut functions: BTreeMap<FunctionKey, FunctionTally> = BTreeMap::new();
     let no_hits = PackageHits::default();
     let views: Vec<(Word, PackageView<'_>)> = snapshot
         .packages
@@ -183,15 +183,16 @@ pub fn build_report(
             let (1, Some((key, owner))) = (callee.len(), callee.first_key_value()) else {
                 continue;
             };
-            // The caller's own record of the function, when it has one, so that
-            // its own root is recognized below; otherwise the first package's.
-            let (callee_package, callee) = package
-                .record_with(key, digest, &mut files)
-                .map_or(*owner, |idx| (*commitment, idx));
+            // The caller's own records of the function, when it has any, so
+            // that its own root is recognized; otherwise the first package's.
+            let own = package.records_with(key, digest, &mut files);
+            let (callee_package, callee) = own.first().map_or(*owner, |idx| (*commitment, *idx));
             // The function's own root, the child of a `call` outside any copy,
-            // is counted by its starts.
-            let own_root = callee_package == *commitment
-                && debug_info.functions()[callee as usize].source_node.into_option() == Some(child);
+            // is counted by its starts. Any of the caller's records may carry
+            // it: an imported record of the same function has none.
+            let own_root = own.iter().any(|idx| {
+                debug_info.functions()[*idx as usize].source_node.into_option() == Some(child)
+            });
             // Crediting another package's record relies on the collector never
             // seeing the root start of a procedure entered through an external
             // node: the processor runs that start inside the step that resolves
@@ -353,15 +354,17 @@ impl<'a> PackageView<'a> {
         Some((files.key(&path), record.line.0 + 1, name.to_string()))
     }
 
-    /// The canonical record of this package with the identity `key` and the
-    /// MAST root `digest`, if any.
-    fn record_with(&self, key: &FunctionKey, digest: Word, files: &mut Files) -> Option<u32> {
+    /// The canonical records of this package with the identity `key` and the
+    /// MAST root `digest`, in table order.
+    fn records_with(&self, key: &FunctionKey, digest: Word, files: &mut Files) -> Vec<u32> {
         let debug_info = &self.package.debug_info;
-        (0..debug_info.functions().len() as u32).find(|idx| {
-            self.canonical[*idx as usize] == *idx
-                && debug_info.functions()[*idx as usize].mast_root == digest
-                && self.function_key(*idx, files).as_ref() == Some(key)
-        })
+        (0..debug_info.functions().len() as u32)
+            .filter(|idx| {
+                self.canonical[*idx as usize] == *idx
+                    && debug_info.functions()[*idx as usize].mast_root == digest
+                    && self.function_key(*idx, files).as_ref() == Some(key)
+            })
+            .collect()
     }
 
     /// How many times source node `node` started.
@@ -660,6 +663,6 @@ struct FunctionTally {
     /// has one; it is the same for every copy.
     entry: Option<LocationKey>,
     /// Starts of the function's own root, entries of its inlined copies, and
-    /// edges of the `call`s to it, summed over the packages of the run.
+    /// edges of the `call`s to it, summed over the packages of the snapshot.
     starts: u64,
 }
