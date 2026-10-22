@@ -185,13 +185,13 @@ pub fn build_report(
             };
             // The caller's own records of the function, when it has any, so
             // that its own root is recognized; otherwise the first package's.
-            let own = package.records_with(key, digest, &mut files);
-            let (callee_package, callee) = own.first().map_or(*owner, |idx| (*commitment, *idx));
+            let mut own = package.records_with(key, digest, &mut files).peekable();
+            let (callee_package, callee) = own.peek().map_or(*owner, |idx| (*commitment, *idx));
             // The function's own root, the child of a `call` outside any copy,
             // is counted by its starts. Any of the caller's records may carry
             // it: an imported record of the same function has none.
-            let own_root = own.iter().any(|idx| {
-                debug_info.functions()[*idx as usize].source_node.into_option() == Some(child)
+            let own_root = own.any(|idx| {
+                debug_info.functions()[idx as usize].source_node.into_option() == Some(child)
             });
             // Crediting another package's record relies on the collector never
             // seeing the root start of a procedure entered through an external
@@ -270,9 +270,9 @@ pub fn build_report(
             continue;
         };
         // Without an entry location, fall back to the starts of the root, the
-        // entries of every copy, and the edges of every `call` to it. That
-        // misses a body of another package entered through `exec`, whose root
-        // start the collector never sees.
+        // entries of every copy, and the edges of every `call` to it. A body
+        // of another package entered through `exec` is counted where the copy
+        // or the external node that enters it begins, in the calling package.
         let count = entry.map_or(starts, |entry| entries.get(&entry).copied().unwrap_or(0));
         // The definition line is coverable and hit on every entry. A
         // procedure whose body is one basic block has no row there, and LCOV
@@ -356,15 +356,18 @@ impl<'a> PackageView<'a> {
 
     /// The canonical records of this package with the identity `key` and the
     /// MAST root `digest`, in table order.
-    fn records_with(&self, key: &FunctionKey, digest: Word, files: &mut Files) -> Vec<u32> {
+    fn records_with<'f>(
+        &'f self,
+        key: &'f FunctionKey,
+        digest: Word,
+        files: &'f mut Files<'_>,
+    ) -> impl Iterator<Item = u32> + 'f {
         let debug_info = &self.package.debug_info;
-        (0..debug_info.functions().len() as u32)
-            .filter(|idx| {
-                self.canonical[*idx as usize] == *idx
-                    && debug_info.functions()[*idx as usize].mast_root == digest
-                    && self.function_key(*idx, files).as_ref() == Some(key)
-            })
-            .collect()
+        (0..debug_info.functions().len() as u32).filter(move |idx| {
+            self.canonical[*idx as usize] == *idx
+                && debug_info.functions()[*idx as usize].mast_root == digest
+                && self.function_key(*idx, files).as_ref() == Some(key)
+        })
     }
 
     /// How many times source node `node` started.

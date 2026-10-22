@@ -33,11 +33,6 @@ pub struct PackageHits {
 }
 
 impl PackageHits {
-    /// Returns `true` when nothing was recorded.
-    pub fn is_empty(&self) -> bool {
-        self.node_starts.is_empty() && self.op_hits.is_empty() && self.edge_starts.is_empty()
-    }
-
     /// Adds every count of `other` into `self`.
     pub fn merge_from(&mut self, other: &Self) {
         for (node, count) in &other.node_starts {

@@ -54,3 +54,7 @@ With one loop there is no second reading to compare, and the example's
 - The debug executor's per-cycle cost is the stepper's plus its own
   bookkeeping, and any change to how a cycle is described reaches both the
   collector and the debugger at once.
+- The engine change is no longer additive: the debug executor's processor
+  and resume context are read through accessors and the executor is built
+  through a constructor, which 0018's note that the rest was additive
+  predates.

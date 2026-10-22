@@ -109,9 +109,11 @@ pub struct RunFile {
     pub outcome: RunOutcome,
     /// Number of cycles the run attempted: one per record the engine
     /// produced, which is the VM clock when the program ended, plus one when
-    /// the last cycle failed on its operation. A cycle that completes and
-    /// then trips the cycle or continuation-stack limit is already on the
-    /// clock; the step that finalizes a finished program is no cycle.
+    /// the last cycle failed before the clock advanced (on its operation or
+    /// on a control-flow check). A cycle that completes and then trips the
+    /// cycle or continuation-stack limit is already on the clock; a cycle
+    /// that hit nothing counts; the step that finalizes a finished program is
+    /// no cycle.
     pub cycles: u64,
     /// Hits per package, keyed by the package's forest commitment.
     pub packages: Vec<(Word, PackageHits)>,

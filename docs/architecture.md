@@ -20,9 +20,11 @@ Coverage flows through four stages, each handing a plain artifact to the next.
 2. **Collection.** The debugger engine steps the VM and resolves every cycle to
    source; the collector counts, from those records, which source nodes
    started, from which parent, and which operations ran. A cycle whose source
-   the engine could only guess counts nothing, and a package the execution
-   passed through is reported whether or not anything in it was attributed.
-   Invariant: coverage may be lost, never invented.
+   the engine could only guess is counted as a cycle and nothing else, and a
+   package the execution passed through is reported whether or not anything
+   in it was attributed. Invariant: a guessed source is never a hit; coverage
+   may be lost, never invented. The only counts of what did not complete are
+   attempts, a `call` whose callee was not found.
 3. **The coverage directory.** Each VM run ends as one run file holding its
    counts, and each package appears once with its forest and debug info. The
    directory is the only link between collecting and reporting.
@@ -117,8 +119,10 @@ This is the specification the collector and reporter implement together.
    starts of its root, the entries of its inlined copies, found where a copy's
    inline call begins, and the edges into the tree a `call` node calls, when
    that tree's root belongs to one function across every package of the
-   directory, records agreeing on file, line, and name being one function.
-   The function's definition line is credited with that count, because LCOV
+   directory, records agreeing on file, line, and name being one function;
+   a `call` into the function's own root is counted by the root's starts, not
+   by its edge. The function's definition line is credited with that count,
+   because LCOV
    consumers reject a function record without a line record. Invariant: the
    root start of a procedure entered through an external node is never
    recorded, or the edges and the starts would both count the entry.

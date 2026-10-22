@@ -48,7 +48,7 @@ miden-cov-collector = { version = "0.1.0", path = "crates/collector", default-fe
 # The workspace builds against an unreleased debugger engine (#6, #7). Nothing
 # merges until that engine release exists and this patch goes away.
 [patch.crates-io]
-miden-debug-engine = { git = "https://github.com/0xMiden/miden-debug", rev = "c7869e220a74c8523a21d039f5213a2d02806ff1" }
+miden-debug-engine = { git = "https://github.com/0xMiden/miden-debug", rev = "0766204d7c9d77a7c542a95b88342326bac2a163" }
 
 [profile.dev]
 lto = false

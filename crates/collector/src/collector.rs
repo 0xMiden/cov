@@ -58,8 +58,8 @@ impl Collector {
         Self::default()
     }
 
-    /// Number of cycles recorded so far; a cycle that fails is recorded
-    /// before it runs, so it counts.
+    /// Number of cycles recorded so far: a cycle that fails is recorded before
+    /// it runs, so it counts, and so does a cycle that hit nothing.
     pub fn cycles(&self) -> u64 {
         self.cycles
     }
@@ -71,14 +71,19 @@ impl Collector {
     /// an operation counts for its row key, the source node and padded index.
     /// A record whose source node the engine inferred, because the processor
     /// tracked none, counts as a cycle and marks its package as touched but
-    /// hits nothing, except on the first cycle of an execution.
+    /// hits nothing, except on the first cycle of an execution. A package
+    /// whose root's first cycle fails inside the step that enters it is never
+    /// recorded, since no record of its forest is ever produced.
     pub fn on_cycle(&mut self, cycle: &CycleInfo<'_>) {
+        self.cycles += 1;
+        let first = self.cycles == 1;
+        // A forest without debug info cannot be attributed and is not kept;
+        // the cycle still counts.
+        let Some(debug_info) = cycle.debug_info else { return };
         // A package is reported from the first record in its forest, hit or
         // not, so that what ran without being attributed shows as uncovered
         // rather than disappearing.
-        if cycle.debug_info.is_some() {
-            self.entry(cycle.forest, cycle.debug_info);
-        }
+        let hits = &mut self.entry(cycle.forest, Some(debug_info)).hits;
         // The processor tracks no source node for an invocation whose entry
         // root it could not pick (and, when that invocation `call`s a
         // procedure, none for the callee either), and the engine then guesses
@@ -89,12 +94,10 @@ impl Collector {
         // exempt: it is inferred only for an execution started from a bare
         // program, whose debug info the processor installs on that step,
         // adopting the same root; a package-started first record is tracked.
-        if cycle.source_node_inferred && self.cycles > 0 {
-            self.cycles += 1;
+        if cycle.source_node_inferred && !first {
             return;
         }
         if let Some(start) = cycle.node_start {
-            let hits = &mut self.entry(cycle.forest, cycle.debug_info).hits;
             hits.record_node_start(start.node.into());
             if let Some(parent) = start.parent {
                 hits.record_edge_start(parent.into(), start.node.into());
@@ -105,9 +108,8 @@ impl Collector {
         if cycle.op.is_some()
             && let (Some(node), Some(op_idx)) = (cycle.source_node, cycle.op_idx)
         {
-            self.entry(cycle.forest, cycle.debug_info).hits.record_op(node.into(), op_idx);
+            hits.record_op(node.into(), op_idx);
         }
-        self.cycles += 1;
     }
 
     /// Finishes the run and returns the files to write.
