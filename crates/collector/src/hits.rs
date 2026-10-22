@@ -26,7 +26,9 @@ pub struct PackageHits {
     /// package has one source tree however many places call it, and the
     /// `call`s of one procedure within one inlined copy of their caller
     /// share one tree, so a node's own starts cannot tell those sites apart;
-    /// the edge from the calling node can.
+    /// the edge from the calling node can. An edge is recorded when the child
+    /// starts, before the cycle runs, so a `call` whose callee the host
+    /// cannot find still counts one attempt; the run is then marked failed.
     pub edge_starts: BTreeMap<(u32, u32), u64>,
 }
 

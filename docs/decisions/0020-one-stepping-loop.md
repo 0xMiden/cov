@@ -29,6 +29,17 @@ debug executor's path against the stepper's and the programs both read.
 With one loop there is no second reading to compare, and the example's
 "engine" row measured a path that no longer exists apart from the stepper.
 
+## Alternatives
+
+- A shared step core used by both loops (take the context, describe the
+  cycle, run the tracker, dispatch the step), each keeping its own lifecycle
+  and the debug executor its public fields. A smaller change, but the two
+  state machines remain, and so does the question which one is right when
+  they disagree.
+- Keeping the differential test as a pipeline test of the stepper against
+  the debug executor. With the executor a consumer of the stepper it would
+  compare a loop with itself.
+
 ## Consequences
 
 - The attribution tests of this repository are the ones with hand-written

@@ -8,7 +8,7 @@ old one is marked superseded and links forward. Never delete a record.
 |---|----------|--------|
 | [0001](0001-observe-the-vm-not-instrument-the-source.md) | Collect coverage by observing the VM, not by instrumenting the source | accepted |
 | [0002](0002-step-api-until-tracer-is-exported.md) | Observe through the processor's step API until the tracer trait is exported | superseded by 0018 |
-| [0003](0003-cli-uses-the-debugger-engine.md) | The CLI uses the debugger engine for loading, linking, and inputs | accepted, observer sentence superseded by 0018 |
+| [0003](0003-cli-uses-the-debugger-engine.md) | The CLI uses the debugger engine for loading, linking, and inputs | accepted, observer sentence and the reference to 0004 superseded by 0018 |
 | [0004](0004-collector-stays-engine-free.md) | The collector crate never depends on the debugger engine | superseded by 0018 |
 | [0005](0005-vm-version-policy.md) | Published releases only; the workspace follows the debugger's VM pin | accepted, collector-ahead clause superseded by 0018 |
 | [0006](0006-coverage-unit-and-coverable-rule.md) | Rows and source nodes are the unit; hit counts, not booleans | accepted |
@@ -25,4 +25,4 @@ old one is marked superseded and links forward. Never delete a record.
 | [0017](0017-record-node-starts-per-parent-edge.md) | Record node starts per parent edge | accepted, narrowed by 0019, mechanism superseded by 0018 |
 | [0018](0018-collect-through-the-debugger-engine.md) | Collect coverage through the debugger engine | accepted, consequences amended by 0020 |
 | [0019](0019-function-entries-through-inlined-copies.md) | Count function entries through inlined copies | accepted |
-| [0020](0020-one-stepping-loop.md) | One stepping loop in the engine; the differential test is removed | accepted |
+| [0020](0020-one-stepping-loop.md) | One stepping loop in the engine | accepted |

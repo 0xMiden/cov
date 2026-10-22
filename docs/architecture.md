@@ -34,11 +34,11 @@ processes or machines merge by landing in the same directory.
 
 - **collector**: counts the per-cycle records the debugger engine produces and
   writes a run file. It also provides the program-executor implementation that
-  test suites plug into the protocol's transaction executor; when a coverage
-  directory is configured, the program has debug info, and stepping can start
-  at the entry point asked for, that executor drives the engine's
+  test suites plug into the protocol's transaction executor; when coverage is
+  asked for and can be attributed, that executor drives the engine's
   host-agnostic stepper with the host the test suite supplies, and otherwise
-  hands the program to the processor's own executor. The engine is
+  hands the program to the processor's own executor and nothing changes. The
+  engine is
   the only reader of the VM's continuation stream: the collector never
   interprets continuations itself.
 - **cov**: reads a coverage directory, merges runs, resolves source files,
@@ -116,10 +116,9 @@ This is the specification the collector and reporter implement together.
    inline call begins, and the edges into the tree a `call` node calls, when
    that tree's root belongs to one function across every package of the
    directory, records agreeing on file, line, and name being one function.
-   This rests on the collector never seeing the root start of a procedure
-   entered through an external node, which the processor runs inside the
-   step that resolves the node; if it were seen, the root's starts and the
-   edges would both count the entry. Its definition line is credited with
+   Invariant: the root start of a procedure entered through an external node
+   is never recorded, or the edges and the starts would both count the
+   entry. Its definition line is credited with
    that count, because LCOV consumers reject a function record without a line
    record.
 7. Hits are counts. Any consumer that wants booleans truncates at output time.
@@ -156,7 +155,10 @@ and never exist on disk.
   written once per package digest by the first run that touches it. The forest
   is included because the reporter needs node kinds and procedure roots, and
   the original package may only exist inside a test binary. Identical content
-  from concurrent writers is harmless.
+  from concurrent writers is harmless. Nothing is ever removed: a directory
+  is one build of the sources, and a report over packages of several builds
+  mixes their functions, which is the user's to avoid by starting a fresh
+  directory per build.
 - `runs/<id>`: per package, the node starts, the edge starts, and the operation
   hits, plus run metadata (test name, outcome, cycles). Written on run
   completion, never appended to.
