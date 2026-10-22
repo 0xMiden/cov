@@ -147,8 +147,6 @@ pub fn build_report(
     // Entries into a function through the `call` nodes of any package, keyed
     // by the callee's package and record.
     let mut call_entries: BTreeMap<(Word, u32), u64> = BTreeMap::new();
-    // Entries into a function through the inlined copies of its own package.
-    let mut inline_entries: Vec<BTreeMap<u32, u64>> = Vec::with_capacity(views.len());
 
     for (commitment, package) in &views {
         let debug_info = &package.package.debug_info;
@@ -176,10 +174,13 @@ pub fn build_report(
             }
         }
 
-        inline_entries.push(package.inline_entries());
         for (child, digest, edges) in package.call_edges() {
+            // Only visible records can make a root ambiguous: a library
+            // without debug info is never written, and a record without a
+            // file or a name has no identity, so a digest they share with a
+            // reported function is credited to that function.
             let Some(callee) = owners.get(&digest) else { continue };
-            let [(key, owner)] = callee.iter().collect::<Vec<_>>()[..] else {
+            let (1, Some((key, owner))) = (callee.len(), callee.first_key_value()) else {
                 continue;
             };
             // The caller's own record of the function, when it has one, so that
@@ -202,8 +203,10 @@ pub fn build_report(
         }
     }
 
-    for ((commitment, package), inline_entries) in views.iter().zip(&inline_entries) {
+    for (commitment, package) in &views {
         let debug_info = &package.package.debug_info;
+        // Entries into a function through the inlined copies of its own package.
+        let inline_entries = package.inline_entries();
         for (function_idx, function) in debug_info.functions().iter().enumerate() {
             if package.canonical[function_idx] != function_idx as u32 {
                 continue;
@@ -218,7 +221,7 @@ pub fn build_report(
             if !files.reported.contains_key(&key) {
                 continue;
             }
-            let names = package.names(function_idx as u32);
+            let names = &package.names[function_idx];
             let is_own = |row: &DebugSourceAsmOp| {
                 debug_info
                     .get_string(row.context_name_idx)
@@ -301,15 +304,18 @@ struct PackageView<'a> {
     /// The assembler records a re-exported procedure twice, differing only
     /// in the linkage name; the first record stands for both.
     canonical: Vec<u32>,
+    /// For each canonical record, every name it and its re-exports go by;
+    /// empty for the other records.
+    names: Vec<Vec<Arc<str>>>,
 }
 
 impl<'a> PackageView<'a> {
     /// Pairs a package with its hits and folds its duplicate records.
     fn new(package: &'a PackageFile, hits: &'a PackageHits) -> Self {
+        let debug_info = &package.debug_info;
+        let functions = debug_info.functions();
         let mut first = BTreeMap::new();
-        let canonical = package
-            .debug_info
-            .functions()
+        let canonical: Vec<u32> = functions
             .iter()
             .enumerate()
             .map(|(idx, function)| {
@@ -323,21 +329,16 @@ impl<'a> PackageView<'a> {
                 *first.entry(record).or_insert(idx as u32)
             })
             .collect();
-        Self { package, hits, canonical }
-    }
-
-    /// Every name the record `function` and its re-exports go by.
-    fn names(&self, function: u32) -> Vec<Arc<str>> {
-        let debug_info = &self.package.debug_info;
-        debug_info
-            .functions()
-            .iter()
-            .enumerate()
-            .filter(|(idx, _)| self.canonical[*idx] == function)
-            .flat_map(|(_, record)| [Some(record.name_idx), record.linkage_name_idx.into_option()])
-            .flatten()
-            .filter_map(|idx| debug_info.get_string(idx))
-            .collect()
+        let mut names = vec![Vec::new(); functions.len()];
+        for (function, canonical) in functions.iter().zip(&canonical) {
+            names[*canonical as usize].extend(
+                [Some(function.name_idx), function.linkage_name_idx.into_option()]
+                    .into_iter()
+                    .flatten()
+                    .filter_map(|idx| debug_info.get_string(idx)),
+            );
+        }
+        Self { package, hits, canonical, names }
     }
 
     /// The identity of the record `function`, if it names a file: the key the
@@ -410,6 +411,11 @@ impl<'a> PackageView<'a> {
                 continue;
             }
             let is_block = matches!(self.exec(node), Some(MastNode::Block(_)));
+            // A parent has children, so it is a control node and runs no
+            // operations of its own. The assembler gives every inline call it
+            // adds to a copied node the node's operation range, and the range
+            // of a control node starts at 0, so the calls containing operation
+            // 0 are all the calls the parent's copy carries: its frame.
             let inherited = |call: &DebugSourceInlineCall| {
                 parent[node_id].is_some_and(|parent| {
                     debug_info.inline_calls_for_operation(parent.into(), 0).any(|above| {
@@ -426,6 +432,10 @@ impl<'a> PackageView<'a> {
                 } else {
                     self.starts(node_id as u32)
                 };
+                // A package file is read with the wire-format checks only, not
+                // the reference checks of a package, so the callee may lie
+                // outside the function table; its entries are then keyed by an
+                // index no record has and never read.
                 let callee = self
                     .canonical
                     .get(u32::from(call.callee_idx) as usize)
