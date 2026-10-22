@@ -1,0 +1,26 @@
+proc leaf
+    push.1 drop
+end
+
+proc middle
+    exec.leaf
+    exec.leaf
+end
+
+proc outer
+    call.middle
+    call.middle
+end
+
+proc wrapped
+    exec.leaf
+end
+
+begin
+    exec.outer
+    exec.wrapped
+    exec.wrapped
+    call.wrapped
+    call.middle
+    call.middle
+end

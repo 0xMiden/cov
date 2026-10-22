@@ -1,6 +1,6 @@
 # 0004: The collector crate never depends on the debugger engine
 
-Status: accepted (2026-10-19)
+Status: superseded by [0018](0018-collect-through-the-debugger-engine.md) (2026-10-20); accepted 2026-10-19
 
 ## Context
 

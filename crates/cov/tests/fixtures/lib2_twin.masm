@@ -1,0 +1,16 @@
+proc first
+    push.1 drop
+end
+
+proc second
+    push.2 drop
+end
+
+pub proc execs
+    exec.first
+    exec.second
+end
+
+pub proc calls
+    call.execs
+end

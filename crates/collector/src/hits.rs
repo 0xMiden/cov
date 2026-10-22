@@ -22,18 +22,17 @@ pub struct PackageHits {
     /// How many times each source node started as the child of a given
     /// parent, keyed by (parent source node id, child source node id).
     ///
-    /// Needed because a procedure has one source tree however many places
-    /// call it: an `if` arm that is a bare `exec` shares its node with every
-    /// other call of that procedure, and only the edge tells the arms apart.
+    /// Needed because a procedure entered dynamically or from another
+    /// package has one source tree however many places call it, and the
+    /// `call`s of one procedure within one inlined copy of their caller
+    /// share one tree, so a node's own starts cannot tell those sites apart;
+    /// the edge from the calling node can. An edge is recorded when the child
+    /// starts, before the cycle runs, so a `call` whose callee the host
+    /// cannot find still counts one attempt; the run is then marked failed.
     pub edge_starts: BTreeMap<(u32, u32), u64>,
 }
 
 impl PackageHits {
-    /// Returns `true` when nothing was recorded.
-    pub fn is_empty(&self) -> bool {
-        self.node_starts.is_empty() && self.op_hits.is_empty() && self.edge_starts.is_empty()
-    }
-
     /// Adds every count of `other` into `self`.
     pub fn merge_from(&mut self, other: &Self) {
         for (node, count) in &other.node_starts {

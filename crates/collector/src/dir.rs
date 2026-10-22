@@ -12,8 +12,8 @@ use std::{
 use miden_core::serde::{Deserializable, Serializable};
 
 use crate::{
+    collector::CollectorOutput,
     format::{PACKAGE_FILE_EXTENSION, PackageFile, RUN_FILE_EXTENSION, RunFile},
-    observer::ObserverOutput,
 };
 
 /// Environment variable naming the coverage directory. When unset, in-test
@@ -66,9 +66,9 @@ impl CoverageDir {
         self.root.join("runs")
     }
 
-    /// Writes everything an observer produced: each package file unless it
+    /// Writes everything a collector produced: each package file unless it
     /// already exists, then the run file. Returns the run file path.
-    pub fn write_output(&self, output: &ObserverOutput) -> io::Result<PathBuf> {
+    pub fn write_output(&self, output: &CollectorOutput) -> io::Result<PathBuf> {
         for package in &output.packages {
             self.write_package(package)?;
         }

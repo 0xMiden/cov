@@ -1,0 +1,5 @@
+use fixtures::amb
+
+begin
+    exec.amb::leaf
+end

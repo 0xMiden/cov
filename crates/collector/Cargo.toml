@@ -26,6 +26,7 @@ std = [
 
 [dependencies]
 miden-core.workspace = true
+miden-debug-engine = { workspace = true, default-features = false }
 miden-mast-package.workspace = true
 miden-processor.workspace = true
 

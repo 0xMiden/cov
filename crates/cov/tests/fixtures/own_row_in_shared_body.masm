@@ -1,0 +1,22 @@
+proc a
+    push.1 drop
+end
+
+proc b
+    exec.a
+    push.2 drop
+end
+
+proc c
+    exec.a
+    push.2 drop
+end
+
+proc w
+    call.b
+end
+
+begin
+    exec.w
+    exec.c
+end

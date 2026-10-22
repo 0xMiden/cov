@@ -13,7 +13,7 @@ use std::{
 
 use anyhow::{Context, anyhow, bail};
 use clap::Args;
-use miden_cov_collector::{Observer, RunOutcome, dir::CoverageDir, run_to_end};
+use miden_cov_collector::{Collector, RunOutcome, dir::CoverageDir};
 use miden_debug_engine::{
     ExecutionConfig, Executor, HybridPackageRegistry, LinkLibrary,
     debug_types::{DefaultSourceManager, SourceManager, Uri},
@@ -96,20 +96,22 @@ pub fn run(args: RunArgs) -> anyhow::Result<()> {
     .map_err(from_report)
     .context("failed to load link libraries")?;
     let source_manager: Arc<dyn SourceManager> = Arc::new(DefaultSourceManager::default());
-    let mut exec = Executor::from_config(args.inputs.unwrap_or_default())
+    let mut collector = Collector::new();
+    let result = match Executor::from_config(args.inputs.unwrap_or_default())
         .with_registry(registry)
-        .into_debug(package, source_manager);
-    let ctx = exec.resume_ctx.take().expect("a fresh debug executor has a resume context");
-
-    let mut observer = Observer::new();
-    let result = run_to_end(&mut exec.processor, &mut exec.host, ctx, &mut observer);
-    let outcome = match &result {
-        Ok(()) => RunOutcome::Ok,
-        Err(error) => RunOutcome::Failed(error.to_string()),
+        .into_stepper(package, source_manager)
+    {
+        // The engine describes each cycle to the collector before executing it.
+        Ok((mut stepper, mut host)) => {
+            stepper.run_sync(&mut host, |cycle| collector.on_cycle(cycle))
+        },
+        // A context that cannot be built is an execution that failed before
+        // its first cycle; it is written like any other.
+        Err(error) => Err(error),
     };
 
     let name = args.name.unwrap_or_else(|| default_run_name(&args.package));
-    let output = observer.finish(name, outcome);
+    let output = collector.finish(name, RunOutcome::of(&result));
     let cov_dir = args.cov_dir.map_or_else(CoverageDir::from_env_or_default, CoverageDir::new);
     let path = cov_dir
         .write_output(&output)

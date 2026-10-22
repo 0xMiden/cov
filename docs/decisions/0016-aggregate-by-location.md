@@ -1,6 +1,6 @@
 # 0016: Aggregate hits by location; count functions by their first instruction
 
-Status: accepted (2026-10-19). Refines 0006 and 0007.
+Status: accepted (2026-10-19). Refines 0006 and 0007; function fallback refined by [0019](0019-function-entries-through-inlined-copies.md).
 
 ## Context
 

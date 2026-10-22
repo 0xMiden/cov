@@ -1,0 +1,24 @@
+proc one
+    push.1 drop
+end
+
+proc two
+    push.2 drop
+end
+
+proc leaf
+    exec.one
+    exec.two
+end
+
+proc wrapper
+    exec.leaf
+end
+
+proc outer
+    call.wrapper
+end
+
+begin
+    exec.outer
+end

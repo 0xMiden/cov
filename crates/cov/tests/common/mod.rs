@@ -16,8 +16,11 @@ use miden_cov::{
     BranchCoverage, FileCoverage, FunctionCoverage, Report, ReportFilter, Snapshot, SourceResolver,
     build_report,
 };
-use miden_cov_collector::{Observer, RunOutcome, dir::CoverageDir, run_to_end};
-use miden_mast_package::Package;
+use miden_cov_collector::{Collector, RunOutcome, Stepper, dir::CoverageDir};
+use miden_mast_package::{
+    Package,
+    debug_info::{DebugSourceNodeId, FunctionInfo, PackageDebugInfo},
+};
 use miden_processor::{DefaultHost, ExecutionError, FastProcessor, StackInputs};
 
 /// The path of the fixture `tests/fixtures/<name>.masm`.
@@ -33,7 +36,8 @@ pub fn assemble_program(source: &Path) -> Arc<Package> {
 
 /// Runs `package` on `stack` (first element on top) with `host` under the
 /// collector and writes the run, named `name`, into `coverage` whatever the
-/// outcome.
+/// outcome of the execution. An execution context that cannot be built panics
+/// instead, before anything is written.
 pub fn record_run(
     coverage: &CoverageDir,
     package: &Arc<Package>,
@@ -42,15 +46,13 @@ pub fn record_run(
     stack: &[u64],
 ) -> Result<(), ExecutionError> {
     let stack: Vec<Felt> = stack.iter().map(|value| Felt::new(*value).unwrap()).collect();
-    let mut processor = FastProcessor::new(StackInputs::new(&stack).unwrap());
-    let ctx = processor.get_initial_resume_context_for_package(package.clone()).unwrap();
-    let mut observer = Observer::new();
-    let result = run_to_end(&mut processor, &mut host, ctx, &mut observer);
-    let outcome = match &result {
-        Ok(()) => RunOutcome::Ok,
-        Err(error) => RunOutcome::Failed(error.to_string()),
-    };
-    coverage.write_output(&observer.finish(name.to_owned(), outcome)).unwrap();
+    let processor = FastProcessor::new(StackInputs::new(&stack).unwrap());
+    let mut stepper = Stepper::for_package(processor, package.clone()).unwrap();
+    let mut collector = Collector::new();
+    let result = stepper.run_sync(&mut host, |cycle| collector.on_cycle(cycle));
+    coverage
+        .write_output(&collector.finish(name.to_owned(), RunOutcome::of(&result)))
+        .unwrap();
     result
 }
 
@@ -200,6 +202,23 @@ pub fn assert_functions(functions: &[(&str, u32, u64)], expected: &[(&str, u32, 
         assert!(name.ends_with(suffix), "{name} should end with {suffix}");
         assert_eq!((*line, *count), (*expected_line, *expected_count), "{name}");
     }
+}
+
+/// The function records of `debug_info` whose name ends with `suffix`, in
+/// table order.
+pub fn records_named<'a>(
+    debug_info: &'a PackageDebugInfo,
+    suffix: &str,
+) -> Vec<&'a FunctionInfo<DebugSourceNodeId>> {
+    debug_info
+        .functions()
+        .iter()
+        .filter(|function| {
+            debug_info
+                .get_string(function.name_idx)
+                .is_some_and(|name| name.ends_with(suffix))
+        })
+        .collect()
 }
 
 /// The branches of `file` as `(line, executed, arms)`.

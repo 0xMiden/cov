@@ -1,0 +1,6 @@
+use fixtures::lib2
+
+begin
+    exec.lib2::wrap
+    push.0 drop
+end

@@ -1,0 +1,20 @@
+proc leaf1
+    push.1 drop
+end
+
+proc leaf2
+    push.2 drop
+end
+
+pub proc only_execs
+    exec.leaf1
+    exec.leaf2
+end
+
+pub proc entry
+    exec.only_execs
+end
+
+pub proc wrap
+    call.only_execs
+end

@@ -1,0 +1,20 @@
+proc inner1
+    push.1 drop
+end
+
+proc inner2
+    push.2 drop
+end
+
+pub proc leaf
+    exec.inner1
+    exec.inner2
+end
+
+pub proc wrapper
+    exec.leaf
+end
+
+pub proc other
+    push.3 drop
+end
