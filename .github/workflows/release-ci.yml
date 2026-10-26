@@ -1,13 +1,19 @@
 # The required `release / gate` check.
 #
-# Always runs, with no top-level path filters, so that a required status check
-# can never be satisfied by being skipped. Change impact is computed inside the
-# workflow instead.
+# Runs only for `main`, the branch a release is cut from: on pull requests into
+# it and in its merge queue. Feature branches and `next` carry work that is not
+# publishable yet (unreleased dependencies under `[patch]`, for one), and the
+# release checks would be red there by design. Within that scope it always
+# runs, with no path filters, so that a required status check can never be
+# satisfied by being skipped. Change impact is computed inside the workflow
+# instead.
 name: release
 
 on:
   pull_request:
+    branches: [main]
   merge_group:
+    branches: [main]
 
 permissions: {}
 
