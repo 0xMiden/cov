@@ -1998,7 +1998,7 @@ dependencies = [
 [[package]]
 name = "miden-debug-engine"
 version = "0.19.0"
-source = "git+https://github.com/0xMiden/miden-debug?rev=28d7a50156be760dfcf2ef3b2d09f5893d392477#28d7a50156be760dfcf2ef3b2d09f5893d392477"
+source = "git+https://github.com/0xMiden/miden-debug?rev=c82f1ca2f28180f47e896561e9f6bd44f379c83c#c82f1ca2f28180f47e896561e9f6bd44f379c83c"
 dependencies = [
  "clap",
  "hashbrown 0.17.1",

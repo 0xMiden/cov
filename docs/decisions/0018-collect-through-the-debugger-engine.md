@@ -7,7 +7,7 @@ differential test, the debug executor and the additive-change note amended by
 [0020](0020-one-stepping-loop.md); the ambiguous-entry gap restated by
 [0021](0021-guessed-source-nodes-count-nothing.md). Lands when the engine release that carries
 the per-cycle hook is published; until then the branch builds against the
-engine's `cov-use-debug` branch, pinned by commit.
+engine's `next` branch, pinned by the commit that merged the hook.
 
 ## Context
 
