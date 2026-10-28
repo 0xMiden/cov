@@ -5,9 +5,12 @@ sentence and the reference to 0004 of 0003, the VM-pin consequence of 0011,
 and the forest-return mechanism of 0017; narrows 0005. Consequences on the
 differential test, the debug executor and the additive-change note amended by
 [0020](0020-one-stepping-loop.md); the ambiguous-entry gap restated by
-[0021](0021-guessed-source-nodes-count-nothing.md). Lands when the engine release that carries
-the per-cycle hook is published; until then the branch builds against the
-engine's `next` branch, pinned by the commit that merged the hook.
+[0021](0021-guessed-source-nodes-count-nothing.md). Lands on `next` building
+against the engine's `next` branch, pinned by the commit that merged the hook
+(decision of 2026-10-28; the map's version policy allows the pin on `next`);
+the pin, the `allow-git` entry of the deny config and the `[patch]` go when
+the engine release that carries the hook is published, before the next
+promotion to `main`.
 
 ## Context
 

@@ -198,10 +198,13 @@ execution's outputs are returned as usual.
 
 ## Version policy
 
-Miden dependencies are published releases. A change that needs an engine that
-is not released yet builds against a pinned commit of the engine's branch, with
-the decision record naming the branch, and does not merge until the release
-exists. The workspace tracks one VM release: the one the debugger engine pins,
+Miden dependencies are published releases on `main`, the branch a release is
+cut from. A change that needs an engine that is not released yet builds
+against a pinned commit of the engine's own development branch, with the
+decision record naming the commit's branch, and may land on `next` that way;
+the pin goes before `next` is promoted to `main`, which the release checks
+there refuse until it does. The workspace tracks one VM release: the one the
+debugger engine pins,
 since every crate here builds on the engine. If the protocol moves to a VM
 release the debugger does not yet support, coverage of the protocol's tests
 waits for the debugger to follow.
