@@ -89,6 +89,16 @@ pub enum RunOutcome {
     Failed(String),
 }
 
+impl RunOutcome {
+    /// The outcome of an execution that ended with `result`.
+    pub fn of<T, E: core::fmt::Display>(result: &Result<T, E>) -> Self {
+        match result {
+            Ok(_) => Self::Ok,
+            Err(error) => Self::Failed(alloc::format!("{error}")),
+        }
+    }
+}
+
 /// The hits of one VM execution, written when the execution ends.
 #[derive(Debug, Clone)]
 pub struct RunFile {
@@ -97,7 +107,13 @@ pub struct RunFile {
     pub name: String,
     /// How the run ended.
     pub outcome: RunOutcome,
-    /// Number of clock cycles observed.
+    /// Number of cycles the run attempted: one per record the engine
+    /// produced, which is the VM clock when the program ended, plus one when
+    /// the last cycle failed before the clock advanced (on its operation or
+    /// on a control-flow check). A cycle that completes and then trips the
+    /// cycle or continuation-stack limit is already on the clock; a cycle
+    /// that hit nothing counts; the step that finalizes a finished program is
+    /// no cycle.
     pub cycles: u64,
     /// Hits per package, keyed by the package's forest commitment.
     pub packages: Vec<(Word, PackageHits)>,

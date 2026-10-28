@@ -1,0 +1,16 @@
+# The infer.masm twins (here and in crates/cov/tests/fixtures/) with `x` and the then-arm failing.
+pub proc x
+    push.0 assert
+end
+
+proc body
+    if.true
+        push.0 assert
+    else
+        push.2 drop
+    end
+end
+
+pub proc entry
+    exec.body
+end

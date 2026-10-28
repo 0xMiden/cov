@@ -55,7 +55,7 @@ One-time setup, requiring repository-admin and crates.io-owner access.
 | Immutable releases | Enabled for the repository. |
 | Environment `release` | Required reviewers; self-review disabled; deployment restricted to protected `main`. |
 | Tag ruleset for `v*` | Restrict deletions and updates only. Do not restrict creations: a bypass would have to cover every workflow, since `GITHUB_TOKEN` acts as the repository-wide Actions app. |
-| Required status check | `release / gate` |
+| Required status check | `release / gate`, on `main` |
 
 ---
 
@@ -94,9 +94,12 @@ Entirely in pull requests; nothing touches crates.io or creates a tag.
 
 ### The pull-request gate
 
-`release-ci.yml` runs on every pull request and exposes one required check,
-`release / gate`. It calls `release-verify.yml`, the same workflow production
-calls, so pull requests and releases run identical checks.
+`release-ci.yml` runs on pull requests into `main` and in its merge queue, and
+exposes one required check, `release / gate`. It does not run for `next` or
+for feature branches, whose work need not be publishable (an unreleased
+dependency under `[patch]` fails the release lint by design). It calls
+`release-verify.yml`, the same workflow production calls, so release pull
+requests and releases run identical checks.
 
 | Job | What it does |
 | --- | --- |

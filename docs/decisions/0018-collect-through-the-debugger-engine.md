@@ -1,0 +1,104 @@
+# 0018: Collect coverage through the debugger engine
+
+Status: accepted (2026-10-20). Supersedes 0002 and 0004, the observer
+sentence and the reference to 0004 of 0003, the VM-pin consequence of 0011,
+and the forest-return mechanism of 0017; narrows 0005. Consequences on the
+differential test, the debug executor and the additive-change note amended by
+[0020](0020-one-stepping-loop.md); the ambiguous-entry gap restated by
+[0021](0021-guessed-source-nodes-count-nothing.md). Lands on `next` building
+against the engine's `next` branch, pinned by the commit that merged the hook
+(decision of 2026-10-28; the map's version policy allows the pin on `next`);
+the pin, the `allow-git` entry of the deny config and the `[patch]` go when
+the engine release that carries the hook is published, before the next
+promotion to `main`.
+
+## Context
+
+The debugger engine already resolves, on every cycle, which source row is
+about to execute: the forest, the source node, the padded operation index,
+and the inline call frames. The collector did the same work in its own
+observer over the processor's step API (0002), kept engine-free so that it
+could follow the protocol's VM release ahead of the debugger (0004). Two
+readings of the same continuation stream is one too many: every VM change to
+that stream had to be understood twice, and the differential test existed
+only to keep them in agreement.
+
+Measured before the change, release build, best of five: stepping the
+processor costs about ten times its raw execution on an operation-heavy
+program, and the engine's full step costs about twice the collector's own
+step on top of that, because it clones the operand stack twice per cycle and
+refreshes the call stack, the debug variables, and the recent-operation ring.
+
+## Decision
+
+The engine is the only reader of the continuation stream. It produces one
+record per cycle, before the cycle runs, that names the forest, the source
+node, the operation and its padded index, the inline frames, and, when the
+cycle starts a source node, the parent that started it (the open-node stack
+of 0017 moves into the engine). Instruments receive the record through the
+engine's existing instrument trait, and a stepper that owns no host drives
+the processor with any synchronous or asynchronous host and hands each record
+to a callback. The engine's debug executor goes through the same resolution.
+
+The collector depends on the engine. It keeps the per-package hit tables, the
+run file, and the coverage directory, and feeds them from the records. Both
+entry points drive the stepper: the `run` command with the host the engine
+builds from its registry, inputs file, and event handlers; the program
+executor, which lets test suites plug coverage into executors generic over
+the VM's program-executor trait, with the host the suite supplies.
+
+## Alternatives
+
+- Keep the observer and add the engine as a second backend: two
+  implementations to keep in agreement, the situation this record ends.
+- Make the debug executor generic over the host and drive it from the program
+  executor: its state is not `Send`, which the program-executor future must
+  be, and its inspection bookkeeping is dead weight for batch collection.
+- Export the processor's tracer trait and hook there: a VM change with a
+  release cycle of its own, and it would still leave the source resolution
+  duplicated between the engine and the collector.
+- Per-event callbacks instead of one record per cycle: in step mode a cycle
+  has at most one node start, and one record per step is easier to test.
+
+## Consequences
+
+- The collector moves to a new VM release only when the debugger does. The
+  clause of 0005 that let the collector pin ahead no longer holds; the
+  protocol's test suites wait for the debugger when it lags.
+- The run file format is unchanged. The shape matrix, the shared-arms test,
+  and the differential test pass with unchanged expectations; the
+  differential test is now the contract test of the engine's hook against the
+  engine's own row attribution.
+- Collection never goes through the debug executor, whose per-cycle
+  bookkeeping costs about twice the stepper; the debug executor goes through
+  the same resolution and stays the debugger's own. Rust coverage needs more
+  static debug info per record, not runtime state, so adding to the record
+  serves both.
+- Gaps found in the VM's step API, to be raised upstream: no public way to
+  rebuild the execution output from a stepped processor (the stepper clones
+  the deferred state to export the witness); no way to start a stepped
+  execution at a given entry-point source node, so the program executor
+  steps from the unique source root when that is the node asked for and
+  otherwise runs the plain processor without collecting, saying so on
+  standard error; the supplied debug info is deep-copied on the first step
+  of a context built from a bare program. An ambiguous root with no entry
+  point named goes to the processor's own executor, which fails the same way
+  before any cycle, so no run is written for it.
+- With the coverage directory variable unset, or no debug info to attribute
+  to, the program executor runs the processor's own program executor, with
+  the debug info and the entry point it was given: an enabled feature costs
+  nothing until coverage is asked for (0011 holds). The collector's `no_std`
+  is a feature discipline checked by its own build, not a target claim: the
+  engine's dependency graph still asks for the standard library.
+- Moving to the VM release the engine pins loses the coverage below the entry
+  of a dynamically linked library whose entry procedure compiles to the same
+  MAST as another procedure of the library, such as a wrapper made of one
+  `exec`: the processor cannot pick the source root of the entry and tracks no
+  source nodes for that invocation. A VM gap, to be raised upstream; the
+  reporter test that shows it is ignored until then.
+- The run is named after the thread that starts the execution, which under
+  the standard test runner is the test; a runtime that starts executions from
+  worker threads loses that attribution.
+- The engine's debug executor gained a field, which breaks construction by
+  struct literal; the debugger's own TUI did that and was updated. The rest
+  of the engine change is additive.

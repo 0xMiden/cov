@@ -1,6 +1,6 @@
 # 0011: Test suites activate coverage through a feature plus an environment variable
 
-Status: accepted (2026-10-19)
+Status: accepted (2026-10-19); the VM-pin consequence is superseded by [0018](0018-collect-through-the-debugger-engine.md)
 
 ## Context
 

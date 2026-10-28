@@ -1,0 +1,6 @@
+use fixtures::amb
+
+begin
+    exec.amb::other
+    call.amb::wrapper
+end

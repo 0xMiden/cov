@@ -68,7 +68,7 @@ The toolchain is pinned in `rust-toolchain.toml`. Tests run with
 ```sh
 make build        # build the workspace in release mode
 make test         # run the test suite
-make lint         # clippy, rustfmt check and cargo-shear
+make lint         # clippy, rustfmt check, cargo-shear and the collector without std
 make fix          # apply clippy and rustfmt fixes
 make doc          # build and check the documentation
 make help         # list all targets

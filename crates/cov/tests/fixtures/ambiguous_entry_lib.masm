@@ -1,0 +1,15 @@
+proc leaf
+    if.true
+        push.1 drop
+    else
+        push.2 drop
+    end
+end
+
+proc middle
+    exec.leaf
+end
+
+pub proc entry
+    exec.middle
+end

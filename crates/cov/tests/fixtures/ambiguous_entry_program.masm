@@ -1,0 +1,5 @@
+use fixtures::ambiguous_entry_lib
+
+begin
+    exec.ambiguous_entry_lib::entry
+end

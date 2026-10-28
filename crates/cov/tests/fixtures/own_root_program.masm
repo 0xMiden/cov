@@ -1,0 +1,5 @@
+use fixtures::own_root_t
+
+begin
+    call.own_root_t::target
+end

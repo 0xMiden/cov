@@ -27,7 +27,6 @@ allow = [
     "BSD-2-Clause",
     "BSD-3-Clause",
     "CC0-1.0",
-    "ISC",
     "Unicode-3.0",
     "MPL-2.0",
     "Zlib",
@@ -72,4 +71,6 @@ skip-tree = [
 unknown-registry = "deny"
 unknown-git = "deny"
 allow-registry = ["https://github.com/rust-lang/crates.io-index"]
-allow-git = []
+# Temporary: the workspace builds against an unreleased debugger engine (#6, #7).
+# Remove together with the `[patch.crates-io]` entry when that engine is released.
+allow-git = ["https://github.com/0xMiden/miden-debug"]

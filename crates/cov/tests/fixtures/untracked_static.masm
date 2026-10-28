@@ -1,0 +1,5 @@
+use fixtures::untracked_lib
+
+begin
+    exec.untracked_lib::wrap
+end

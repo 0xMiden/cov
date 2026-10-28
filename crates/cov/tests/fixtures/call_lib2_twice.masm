@@ -1,0 +1,6 @@
+use fixtures::lib2
+
+begin
+    call.lib2::only_execs
+    call.lib2::only_execs
+end
