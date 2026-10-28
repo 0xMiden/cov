@@ -101,6 +101,13 @@ For example, a new change to the collector crate might have the following messag
     ```
     `make fix` applies the automatic clippy and rustfmt fixes. Formatting uses a pinned nightly
     rustfmt, installed with `make install-rustfmt`.
+- CI measures the coverage of the Rust code in this repository with
+  [cargo-llvm-cov](https://github.com/taiki-e/cargo-llvm-cov) and
+  [octocov](https://github.com/k1LoW/octocov) comments on each pull request with the change
+  against the base branch. The coverage is only reported: below 90% line coverage the comment
+  carries a warning and CI does not fail. Run it locally with `make coverage`, which needs
+  `cargo-llvm-cov` and the `llvm-tools-preview` rustup component and writes `rust-coverage.xml`.
+  Integration tests, their fixtures and `tests/common` are not part of the measured code.
 
 ### Versioning
 We use [semver](https://semver.org/) naming convention.
