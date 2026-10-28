@@ -81,6 +81,15 @@ test: ## Run the workspace test suite; accepts EXPR= and EXTRA= for nextest
 test-build: ## Build the test binaries for the workspace (no run)
 	$(MAKE) test EXTRA="--no-run"
 
+# -- coverage -------------------------------------------------------------------------------------
+
+# The Rust code coverage of this repository's own test suite (not the coverage of Miden
+# programs that miden-cov measures). Integration tests, their fixtures and `tests/common` are
+# excluded from the measured set. Needs cargo-llvm-cov and the llvm-tools rustup component.
+.PHONY: coverage
+coverage: ## Measure the Rust code coverage of the test suite into rust-coverage.xml (Cobertura)
+	$(BACKTRACE) cargo llvm-cov nextest --workspace --profile $(NEXTEST_PROFILE) $(ALL_FEATURES) --ignore-filename-regex '/tests/' --cobertura --output-path rust-coverage.xml $(EXTRA) $(EXPR)
+
 # --- checking ------------------------------------------------------------------------------------
 
 .PHONY: check

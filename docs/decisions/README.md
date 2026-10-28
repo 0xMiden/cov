@@ -27,3 +27,4 @@ old one is marked superseded and links forward. Never delete a record.
 | [0019](0019-function-entries-through-inlined-copies.md) | Count function entries through inlined copies | accepted |
 | [0020](0020-one-stepping-loop.md) | One stepping loop in the engine | accepted |
 | [0021](0021-guessed-source-nodes-count-nothing.md) | A guessed source node counts nothing; a touched package is always reported | accepted |
+| [0022](0022-rust-code-coverage-in-ci.md) | Rust code coverage in CI, keyed by report name | accepted |

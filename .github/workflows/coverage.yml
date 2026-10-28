@@ -1,0 +1,133 @@
+# Measures the coverage of this repository's Rust code with cargo-llvm-cov and posts the octocov
+# report on pull requests. This is the `rust` report: its config is `.octocov.rust.yml` and
+# every artifact and marker carries the name, so the coverage of the Miden programs can run as a
+# second report next to it. See `.github/scripts/coverage-comment.js` for the report name scheme.
+name: coverage
+
+on:
+  push:
+    branches: [main, next]
+  pull_request:
+    types: [opened, reopened, synchronize]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' || github.event_name == 'pull_request_target' }}
+
+permissions:
+  contents: read
+
+jobs:
+  coverage:
+    name: measure on ubuntu-latest
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Cleanup large tools for build space
+        uses: ./.github/actions/cleanup-runner
+      # Do not pin taiki-e's moving tool shortcut tags by hash. Pin a released
+      # install-action commit and set tool explicitly, or zizmor's
+      # impostor-commit audit can flag stale shortcut-tag hashes.
+      - name: Install cargo-llvm-cov and nextest
+        uses: taiki-e/install-action@83ac0ad63c0167e6f06796fab0fce28db1bf3db0 # v2.87.22
+        with:
+          tool: cargo-llvm-cov,cargo-nextest
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          # The instrumented build shares nothing with the `test` workflow's cache.
+          shared-key: coverage
+          save-if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/next' }}
+      - name: Install rust
+        run: |
+          rustup update --no-self-update
+          rustup component add llvm-tools-preview
+      - name: Measure coverage
+        run: make coverage NEXTEST_PROFILE=ci
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: ${{ always() }}
+        with:
+          name: rust-coverage
+          path: rust-coverage.xml
+          if-no-files-found: warn
+
+  coverage-report:
+    name: render the octocov report
+    # Render with a read-only token, including on fork pull requests.
+    needs: [coverage]
+    outputs:
+      has_report: ${{ steps.octocov.outputs.has_report }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read # Read the baseline report stored as an artifact of the default branch
+    steps:
+      # octocov maps the report to the sources checked out at the same path as in the
+      # `coverage` job.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: rust-coverage
+      # Install the same CLI used by octocov-action, then capture its native summary.
+      - uses: k1LoW/gh-setup@5fb38d34ea857e5a942b6fe10f1723e55055f6c0 # v1.11.9
+        with:
+          repo: github.com/k1LoW/octocov
+          version: v0.83.4
+          bin-match: octocov
+          strict: true
+      - name: Render coverage report
+        id: octocov
+        # Preserve the report even when coverage.acceptable makes octocov exit with an error.
+        continue-on-error: true
+        env:
+          COVERAGE_REPORT: rust
+          OCTOCOV_GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+        # A JavaScript action provides the runtime credentials octocov needs for the
+        # baseline artifact, just like octocov-action.
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: await exec.exec('bash', ['.github/scripts/coverage-report.sh']);
+      - name: Warn about octocov failure
+        if: ${{ steps.octocov.outcome == 'failure' }}
+        run: echo "::warning title=Coverage::octocov failed, the coverage is below the acceptable threshold or the report could not be published. See the octocov step log."
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: ${{ always() && github.event_name == 'pull_request' && steps.octocov.outputs.has_report == 'true' }}
+        with:
+          name: rust-coverage-comment
+          path: ${{ runner.temp }}/rust-coverage-comment/
+          if-no-files-found: error
+
+  coverage-comment:
+    name: attach the report to the pull request
+    needs: [coverage-report]
+    # Forks and Dependabot have read-only tokens; the scheduled publisher handles them.
+    if: >-
+      needs.coverage-report.outputs.has_report == 'true' &&
+      github.event_name == 'pull_request' &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.event.pull_request.user.login != 'dependabot[bot]'
+    permissions:
+      contents: read
+      actions: read # Read the report artifact
+      issues: write # Needed by GitHub to write a comment to the PR
+      pull-requests: write # Write the comment to the PR
+    uses: ./.github/workflows/coverage-comment.yml
+    with:
+      report: rust
+      run_id: ${{ github.run_id }}
+
+  coverage-scripts-tests:
+    name: test the coverage scripts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Test the coverage report and publishing scripts
+        run: node --test .github/scripts/tests/*.test.js

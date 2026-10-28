@@ -1,0 +1,39 @@
+# Pull requests from forks and from Dependabot run with a read-only token, so their coverage
+# runs can only upload the rendered report as an artifact. This scheduled job runs on the
+# default branch with a write token, finds the latest report artifact of each such open pull
+# request, and posts or updates the coverage comment.
+name: Publish fork coverage
+
+on:
+  schedule:
+    - cron: '7,22,37,52 * * * *'
+
+permissions: {}
+
+# Serialize reconciliation so two runs cannot create the same comment.
+concurrency:
+  group: fork-coverage-publisher
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: reconcile coverage report comments on open PRs
+    if: github.repository == '0xMiden/cov'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read # read the trusted publisher from the default branch
+      actions: read # discover coverage runs and download their report artifacts
+      issues: write # create/update the bot's coverage comment
+      pull-requests: write # comment on PRs, including those from forks
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Reconcile coverage comments
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            const { publishForkCoverage } = require(process.env.GITHUB_WORKSPACE + '/.github/scripts/coverage-comment.js');
+            // One call per report, naming the workflow whose runs upload its comment artifact.
+            await publishForkCoverage({ github, context, core }, { name: 'rust', workflow: 'coverage.yml' });
