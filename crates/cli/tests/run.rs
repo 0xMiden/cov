@@ -227,6 +227,72 @@ fn report_merges_runs_into_lcov_and_summary() {
         Err(e) => eprintln!("genhtml not available, skipping HTML check: {e}"),
     }
 
+    // Against itself as the baseline, with a change to the `if`. The
+    // diff's path is relative to the source root, the current directory.
+    let diff = tmp.path().join("change.diff");
+    fs::write(
+        &diff,
+        "+++ b/tests/fixtures/fixture.masm\n@@ -14,0 +15,4 @@\n+    if.true\n+        exec.double\n+    \
+         else\n+        push.7 drop\n",
+    )
+    .unwrap();
+    let page = tmp.path().join("out/page.html");
+    let comment = tmp.path().join("out/comment.md");
+    let output = Command::new(env!("CARGO_BIN_EXE_miden-cov"))
+        .arg("report")
+        .arg("--cov-dir")
+        .arg(&cov)
+        .arg("--baseline")
+        .arg(&lcov)
+        .arg("--diff")
+        .arg(&diff)
+        .arg("--html")
+        .arg(&page)
+        .arg("--markdown")
+        .arg(&comment)
+        .args(["--page-url", "https://example.com/a"])
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(output.status.success(), "stdout: {stdout}\nstderr: {stderr}");
+    assert!(stdout.contains(&format!("wrote {}\n", page.display())), "{stdout}");
+    assert!(stdout.contains(&format!("wrote {}\n", comment.display())), "{stdout}");
+    let html = fs::read_to_string(&page).unwrap();
+    assert!(html.contains("<section id=\"file-tests/fixtures/fixture.masm\">"), "{html}");
+    let row = html
+        .lines()
+        .find(|line| line.starts_with("<tr id=\"file-tests/fixtures/fixture.masm-L16\""))
+        .unwrap();
+    assert!(row.contains("<td>+</td><td>        exec.double</td>"), "{row}");
+    let markdown = fs::read_to_string(&comment).unwrap();
+    assert!(markdown.starts_with("## Coverage\n"), "{markdown}");
+    assert!(
+        markdown.contains(
+            "[<code>tests/fixtures/fixture.masm</code>]\
+             (https://example.com/a#file-tests/fixtures/fixture.masm)"
+        ),
+        "{markdown}"
+    );
+    assert!(markdown.contains("| Lines | "), "{markdown}");
+    assert!(markdown.contains(") | 0.0% |\n"), "{markdown}");
+    assert!(markdown.contains("| 2/2 (100.0%) |"), "{markdown}");
+
+    // A baseline needs a page or a comment to go into, and a missing one is
+    // named.
+    let report_with_baseline = |baseline: &Path| {
+        let mut command = Command::new(env!("CARGO_BIN_EXE_miden-cov"));
+        command.arg("report").arg("--cov-dir").arg(&cov).arg("--baseline").arg(baseline);
+        command
+    };
+    let output = report_with_baseline(&lcov).output().unwrap();
+    assert!(!output.status.success());
+    let missing = tmp.path().join("missing.info");
+    let output = report_with_baseline(&missing).arg("--markdown").arg(&comment).output().unwrap();
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains(&format!("`{}`", missing.display())), "{stderr}");
+
     // Filters drop files from the report, and malformed globs are rejected.
     let report_with = |flag: &str, glob: &str| {
         Command::new(env!("CARGO_BIN_EXE_miden-cov"))

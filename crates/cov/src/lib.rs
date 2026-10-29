@@ -4,7 +4,10 @@
 //! loads it and merges the runs, [`build_report`] applies the coverable rule
 //! with source files found by a [`SourceResolver`] and selected by a
 //! [`ReportFilter`], and the [`lcov`], [`summary`], and [`dump`] modules
-//! render the result. Nothing here executes a program.
+//! render the result. A pull request's report is set against its baseline
+//! and its change by [`compare`], and the [`html`] and [`markdown`] modules
+//! render that comparison as a self-contained page and a pull-request
+//! comment. Nothing here executes a program.
 
 use std::path::PathBuf;
 
@@ -12,7 +15,9 @@ pub mod compare;
 pub mod diff;
 pub mod dump;
 pub mod filter;
+pub mod html;
 pub mod lcov;
+pub mod markdown;
 pub mod model;
 pub mod snapshot;
 pub mod source;
