@@ -1,0 +1,5 @@
+use fixtures::call_first_inner
+
+pub proc pay
+    call.call_first_inner::target
+end

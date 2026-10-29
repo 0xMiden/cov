@@ -1,0 +1,5 @@
+use fixtures::call_first_outer
+
+begin
+    exec.call_first_outer::pay
+end

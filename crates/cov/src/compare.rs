@@ -3,6 +3,7 @@
 
 use std::{
     collections::{BTreeMap, BTreeSet},
+    ops::Add,
     path::{Path, PathBuf},
 };
 
@@ -95,15 +96,19 @@ impl Totals {
 
     /// The totals of every file of `report`.
     pub fn of_report(report: &Report) -> Self {
-        report.files.values().map(Self::of).fold(Self::default(), Self::add)
+        report.files.values().map(Self::of).fold(Self::default(), Add::add)
     }
+}
+
+impl Add for Totals {
+    type Output = Self;
 
     /// Both totals summed.
-    pub fn add(self, other: Self) -> Self {
+    fn add(self, other: Self) -> Self {
         Self {
-            lines: self.lines.add(other.lines),
-            functions: self.functions.add(other.functions),
-            branches: self.branches.add(other.branches),
+            lines: self.lines + other.lines,
+            functions: self.functions + other.functions,
+            branches: self.branches + other.branches,
         }
     }
 }
@@ -126,17 +131,21 @@ impl Ratio {
         })
     }
 
+    /// The hit share in percent, or `None` when there is nothing to cover.
+    pub fn percent(&self) -> Option<f64> {
+        (self.total > 0).then(|| 100.0 * self.hit as f64 / self.total as f64)
+    }
+}
+
+impl Add for Ratio {
+    type Output = Self;
+
     /// Both ratios summed.
-    pub fn add(self, other: Self) -> Self {
+    fn add(self, other: Self) -> Self {
         Self {
             hit: self.hit + other.hit,
             total: self.total + other.total,
         }
-    }
-
-    /// The hit share in percent, or `None` when there is nothing to cover.
-    pub fn percent(&self) -> Option<f64> {
-        (self.total > 0).then(|| 100.0 * self.hit as f64 / self.total as f64)
     }
 }
 

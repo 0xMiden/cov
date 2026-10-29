@@ -258,10 +258,8 @@ fn unresolved_sources_are_listed_not_reported() {
         &ReportFilter::default(),
     );
     assert!(report.files.is_empty());
-    // A program's procedures share no namespace but `$exec`, so the package
-    // is listed under its commitment.
     let (package, paths) = report.unresolved.first_key_value().unwrap();
-    assert!(package.starts_with("package 0x"), "{package}");
+    assert_eq!(package, "programs");
     assert_eq!(paths.iter().collect::<Vec<_>>(), [&source.display().to_string()]);
 
     let mut summary = Vec::new();

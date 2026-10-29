@@ -756,6 +756,65 @@ fn an_own_root_after_an_imported_record_counts_its_starts() {
     assert_functions(&functions(file(&report, &library_t)), &[("helper", 3, 1), ("target", 7, 1)]);
 }
 
+/// A library procedure whose body starts with a `call`, called from another
+/// library's procedure whose whole body is that `call`, itself executed from
+/// the program: the shape of a wallet procedure that starts with a `syscall`,
+/// called by a note. `target`'s root start is never seen, since it is entered
+/// through an external node, and neither is the edge from `pay`'s `call`,
+/// which is `pay`'s root, entered through the program's external node, so it
+/// names no parent for its child. `target` is counted by its first own row,
+/// after the `call`: the search for it stops only at a conditional or a
+/// loop. A search that stopped at the `call` would fall back to the missing
+/// root start and edge and report `target` as never entered.
+#[test]
+fn a_body_starting_with_a_call_entered_from_a_library_call() {
+    let (_tmp, coverage) = coverage_dir();
+    let inner = fixture("call_first_inner");
+    let outer = fixture("call_first_outer");
+    let source_manager: Arc<dyn SourceManager> = Arc::new(DefaultSourceManager::default());
+    let no_support = Vec::<Box<miden_assembly::ast::Module>>::new;
+    let inner_package: Arc<Package> = Arc::from(
+        Assembler::new(source_manager.clone())
+            .assemble_library(
+                "call_first_inner",
+                library_module(&source_manager, "fixtures::call_first_inner", &inner),
+                no_support(),
+            )
+            .unwrap(),
+    );
+    let outer_package: Arc<Package> = Arc::from(
+        Assembler::new(source_manager.clone())
+            .with_package(inner_package.clone(), Linkage::Dynamic)
+            .unwrap()
+            .assemble_library(
+                "call_first_outer",
+                library_module(&source_manager, "fixtures::call_first_outer", &outer),
+                no_support(),
+            )
+            .unwrap(),
+    );
+    let program: Arc<Package> = Arc::from(
+        Assembler::new(source_manager)
+            .with_package(inner_package.clone(), Linkage::Dynamic)
+            .unwrap()
+            .with_package(outer_package.clone(), Linkage::Dynamic)
+            .unwrap()
+            .assemble_program("program", fixture("call_first_program"))
+            .unwrap(),
+    );
+    let host = DefaultHost::default()
+        .with_library(HostLibrary::from(inner_package))
+        .unwrap()
+        .with_library(HostLibrary::from(outer_package))
+        .unwrap();
+    record_run(&coverage, &program, host, "run", &[]).unwrap();
+    let report = default_report(&coverage);
+    let inner = file(&report, &inner);
+    assert_eq!(inner.lines, BTreeMap::from([(1, 1), (2, 1), (5, 1), (7, 1)]));
+    assert_functions(&functions(inner), &[("helper", 1, 1), ("target", 5, 1)]);
+    assert_functions(&functions(file(&report, &outer)), &[("pay", 3, 1)]);
+}
+
 /// Two libraries in two files whose `only_execs` and `execs` compile to the
 /// same MAST, each reached through a `call` inside an inlined copy from a
 /// program linking only that library. Each package records one function
@@ -1109,9 +1168,7 @@ fn dependencies_outside_the_scope_drop_out() {
     let mut labels: Vec<String> =
         snapshot.packages.values().map(miden_cov::model::package_label).collect();
     labels.sort();
-    assert_eq!(labels.len(), 2);
-    assert_eq!(labels[0], "miden::core");
-    assert!(labels[1].starts_with("package 0x"), "{labels:?}");
+    assert_eq!(labels, ["miden::core", "programs"]);
 }
 
 /// The nprime example from the VM repository, run for the first 50 primes

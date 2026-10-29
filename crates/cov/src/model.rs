@@ -66,15 +66,20 @@ fn common_dir(paths: &BTreeSet<String>) -> Option<String> {
 }
 
 /// The label a package is listed under: the namespace its function names
-/// share, such as `miden::core`, or the start of its commitment when they
-/// share none.
+/// share, such as `miden::core`, `programs` for every program, or the start
+/// of its commitment when they share none.
 ///
-/// Coverage directories do not record package names.
+/// Coverage directories do not record package names. A test suite runs many
+/// programs, each a package of its own, and they share one label so that
+/// their unresolved sources, such as the virtual file of an inline test
+/// program, are listed once.
 pub fn package_label(package: &PackageFile) -> String {
     let debug_info = &package.debug_info;
+    // Records of procedures imported from other packages have no tree here.
     let mut names = debug_info
         .functions()
         .iter()
+        .filter(|function| function.source_node.into_option().is_some())
         .filter_map(|function| debug_info.get_string(function.name_idx));
     let namespace = names.next().map(|first| {
         let mut shared: Vec<String> = segments(&first).map(str::to_owned).collect();
@@ -88,7 +93,8 @@ pub fn package_label(package: &PackageFile) -> String {
     });
     match namespace {
         // `$exec` is the namespace of every program.
-        Some(namespace) if !namespace.is_empty() && !namespace.starts_with('$') => namespace,
+        Some(namespace) if namespace.starts_with("$exec") => "programs".to_owned(),
+        Some(namespace) if !namespace.is_empty() => namespace,
         _ => format!("package {}", &package.commitment.to_hex()[..10]),
     }
 }
@@ -675,7 +681,18 @@ impl<'a> PackageView<'a> {
             // A split is entered once per entry of the function, but its
             // arms run conditionally; loop bodies run once per iteration.
             Some(MastNode::Split(_)) => ControlFlow::Break(own_rows.next()),
-            _ => ControlFlow::Break(None),
+            // The search stops only at a conditional or a loop. A `call`,
+            // `syscall`, `dyncall`, `dynexec`, or `exec` of another package
+            // runs once per entry, has no coverable row, and reaches another
+            // procedure's body, so the search goes on past it. Stopping here
+            // would leave the fallback, which misses a body entered by a
+            // `call` that is the caller's root entered through an external
+            // node: that root's start is never seen, so its children have no
+            // parent and the `call`'s edge is never recorded.
+            Some(MastNode::Call(_) | MastNode::Dyn(_) | MastNode::External(_)) => {
+                ControlFlow::Continue(())
+            },
+            Some(MastNode::Loop(_)) | None => ControlFlow::Break(None),
         }
     }
 }
