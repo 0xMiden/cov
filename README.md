@@ -32,21 +32,39 @@ coverage build.
 miden-cov run program.masp --inputs inputs-a.toml --name a
 miden-cov run program.masp --inputs inputs-b.toml --name b
 
-# Merge all runs, print a summary table, and write an LCOV trace.
-# Linked libraries are reported too when their sources resolve; narrow the
-# report with --include and --exclude path globs.
-miden-cov report --lcov lcov.info --include 'src/**'
+# Merge all runs, print a summary table, and write an LCOV trace and a
+# single-page HTML report. Only files under the source root are reported;
+# --include globs name files elsewhere, --exclude globs drop files.
+miden-cov report --lcov lcov.info --html coverage.html
 
-# Render HTML from the trace. --prefix keeps the page tree shallow.
+# Compare with the base branch's LCOV and a diff of the change: the page
+# marks changed lines, and --markdown writes a pull request comment with the
+# deltas and patch coverage, linking to the page at --page-url.
+git diff next... > change.diff
+miden-cov report --baseline base-lcov.info --diff change.diff \
+  --html coverage.html --markdown comment.md --page-url "$PAGE_URL" --title 'Coverage'
+
+# The LCOV trace also works with genhtml and editor gutters.
 genhtml --branch-coverage --prefix "$PWD" --output-directory html lcov.info
 ```
 
 Runs go to the coverage directory, `target/miden-cov` by default or `MIDEN_COV_DIR` when
 set; `--cov-dir` overrides both. Each run is a separate file, so runs from different
 processes or machines merge by being placed in the same directory. `report` resolves source
-paths as stored in the debug info; use `--source-root <dir>` or
-`--path-prefix-map OLD=NEW` when the sources live elsewhere. `miden-cov dump <run-file>`
-prints the raw hits of one run as JSON.
+paths as stored in the debug info; use `--source-root <dir>` (the current directory by
+default) or `--path-prefix-map OLD=NEW` when the sources live elsewhere. Files that cannot be
+found are summarized one line per package with the directory they were expected under.
+`miden-cov dump <run-file>` prints the raw hits of one run as JSON.
+
+## Getting your contract's coverage
+
+[`examples/wallet`](examples/wallet) is a small contract project tested the way the Miden
+protocol tests its MASM: Rust tests prepare the kernel, the advice inputs and the event
+handlers, then run programs through the collector's `CoverageExecutor`. Its tests need no
+change to be measured; setting `MIDEN_COV_DIR` is enough. The crate documentation shows the
+steps, and `make miden-coverage` runs them, writing the LCOV and the HTML page to
+`target/miden-coverage`. CI does the same on every pull request and posts the comparison with
+the base branch as a comment.
 
 ## Roadmap
 
@@ -58,7 +76,7 @@ Each phase is a GitHub issue with its scope and what "done" means.
 - [ ] [#3](https://github.com/0xMiden/cov/issues/3) Measure coverage of Rust programs compiled
       with `cargo miden`
 - [ ] [#4](https://github.com/0xMiden/cov/issues/4) Add a JSON report for agents writing tests
-- [ ] [#5](https://github.com/0xMiden/cov/issues/5) Post coverage on PRs with `octocov`
+- [ ] [#5](https://github.com/0xMiden/cov/issues/5) Post the coverage of Miden code on PRs
 
 ## Building and testing
 
@@ -69,6 +87,7 @@ The toolchain is pinned in `rust-toolchain.toml`. Tests run with
 make build        # build the workspace in release mode
 make test         # run the test suite
 make coverage     # coverage of this repository's Rust code, written to rust-coverage.xml
+make miden-coverage  # coverage of the example's Miden code, written to target/miden-coverage
 make lint         # clippy, rustfmt check, cargo-shear and the collector without std
 make fix          # apply clippy and rustfmt fixes
 make doc          # build and check the documentation

@@ -15,16 +15,19 @@ old one is marked superseded and links forward. Never delete a record.
 | [0007](0007-branches-from-mast-structure.md) | Branch coverage from split and loop nodes, in the MVP | accepted |
 | [0008](0008-coverage-directory.md) | Two-stage workflow through a self-contained coverage directory | accepted |
 | [0009](0009-input-is-a-package-with-debug-info.md) | Input is a package that kept its debug info; no coverage build | accepted |
-| [0010](0010-lcov-primary-output.md) | LCOV is the primary output; octocov for PR comments | accepted |
+| [0010](0010-lcov-primary-output.md) | LCOV is the primary output; octocov for PR comments | accepted, pull request part superseded by 0023 |
 | [0011](0011-test-suite-activation.md) | Test suites activate coverage through a feature plus an environment variable | accepted, VM-pin consequence superseded by 0018 |
 | [0012](0012-repository-organization.md) | Crates under `crates/`; VM-style Makefile, CI, and release; compiler-style Cargo conventions | accepted, release part superseded by 0015 |
 | [0013](0013-documentation-policy.md) | Map, records, roadmap; the code is the source of truth | accepted |
 | [0014](0014-agent-facing-output.md) | Agent feedback is a JSON of uncovered regions with per-test attribution | accepted |
 | [0015](0015-release-process-from-the-compiler.md) | Release process from the compiler, not the VM | accepted |
-| [0016](0016-aggregate-by-location.md) | Aggregate hits by location; count functions by their first instruction | accepted, refined by 0019 |
+| [0016](0016-aggregate-by-location.md) | Aggregate hits by location; count functions by their first instruction | accepted, refined by 0019, report scope superseded by 0024 |
 | [0017](0017-record-node-starts-per-parent-edge.md) | Record node starts per parent edge | accepted, narrowed by 0019, mechanism superseded by 0018 |
 | [0018](0018-collect-through-the-debugger-engine.md) | Collect coverage through the debugger engine | accepted, consequences amended by 0020, ambiguous-entry gap restated by 0021 |
 | [0019](0019-function-entries-through-inlined-copies.md) | Count function entries through inlined copies | accepted |
 | [0020](0020-one-stepping-loop.md) | One stepping loop in the engine | accepted |
-| [0021](0021-guessed-source-nodes-count-nothing.md) | A guessed source node counts nothing; a touched package is always reported | accepted |
-| [0022](0022-rust-code-coverage-in-ci.md) | Rust code coverage in CI, keyed by report name | accepted |
+| [0021](0021-guessed-source-nodes-count-nothing.md) | A guessed source node counts nothing; a touched package is always reported | accepted, reporting narrowed by 0024 |
+| [0022](0022-rust-code-coverage-in-ci.md) | Rust code coverage in CI, keyed by report name | accepted, second-octocov-report consequence superseded by 0023 |
+| [0023](0023-miden-cov-renders-the-pull-request-report.md) | miden-cov renders the pull request page and comment; no octocov for Miden code | accepted |
+| [0024](0024-report-scope-is-the-source-root.md) | The default report scope is the source root; unresolved sources summarized per package | accepted |
+| [0025](0025-ci-measures-a-simulated-user-project.md) | CI measures a simulated user project | accepted |
