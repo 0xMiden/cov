@@ -17,10 +17,11 @@ function reportName(report) {
   return name;
 }
 
-// Rendered by octocov in the read-only report job. Preserve its comparisons and
-// file tables; publishing must never run the PR's octocov configuration.
+// Rendered in the read-only report job, by octocov for `rust` and by miden-cov for `miden`, as
+// a document under a level-2 heading. Preserve its comparisons and file tables; publishing must
+// never run the PR's tools or configuration.
 function summary(report) {
-  if (!report.trim().startsWith('## Code Metrics Report') ||
+  if (!/^## \S/.test(report.trim()) ||
       Buffer.byteLength(report, 'utf8') > 60 * 1024) {
     throw new Error('Missing or oversized octocov report');
   }

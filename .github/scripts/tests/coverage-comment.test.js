@@ -148,6 +148,18 @@ test('invalid coverage is rejected without posting artifact content', async () =
   assert.equal(f.warnings.length, 1);
 });
 
+test('a report is a document under a level-2 heading, whichever tool rendered it', async () => {
+  for (const body of ['### Coverage\n', '#Coverage\n', 'Coverage\n## Coverage\n']) {
+    const f = fixture({ archive: zip({ 'coverage-comment.md': body, 'coverage-pr-context.txt': prContext }) });
+    await publishFork(f);
+    assert.deepEqual(f.writes, [], body);
+  }
+  const miden = '## Miden code coverage\n\n| | Base | Head | Δ |\n';
+  const f = fixture({ archive: zip({ 'coverage-comment.md': miden, 'coverage-pr-context.txt': prContext }) });
+  await publishFork(f);
+  assert.match(f.writes[0].body, /Miden code coverage/);
+});
+
 test('newest report is selected even when CI failed in an unrelated job', async () => {
   const f = fixture({ runs: [{ ...run, id: 99, created_at: '2026-10-06T00:00:00Z' }, { ...run, conclusion: 'failure' }] });
   await publishFork(f);
