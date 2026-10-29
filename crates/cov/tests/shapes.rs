@@ -1087,6 +1087,33 @@ fn call_into_core_library() {
     assert!(branches(sys).contains(&(36, true, [2, 1])), "{:?}", branches(sys));
 }
 
+/// The core library resolves from the cargo registry, outside the crate, so a
+/// report scoped to the crate leaves it out unless an include names it.
+#[test]
+fn dependencies_outside_the_scope_drop_out() {
+    let (_tmp, coverage) = coverage_dir();
+    let source = fixture("core_call");
+    record_run(&coverage, &assemble_with_core(&source), core_host(), "core", &[]).unwrap();
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let scoped = |include: &[&str]| {
+        let filter = ReportFilter::new(include, &[]).unwrap().relative_to(root).scoped_to(root);
+        report(&coverage, &mut SourceResolver::new(None, vec![]), &filter)
+    };
+
+    only_file(&scoped(&[]), &source);
+    let included = scoped(&["**/asm/sys/mod.masm"]);
+    assert_eq!(included.files.len(), 1, "{:?}", included.files.keys());
+    core_sys(&included);
+
+    let snapshot = miden_cov::Snapshot::load(&coverage).unwrap();
+    let mut labels: Vec<String> =
+        snapshot.packages.values().map(miden_cov::model::package_label).collect();
+    labels.sort();
+    assert_eq!(labels.len(), 2);
+    assert_eq!(labels[0], "miden::core");
+    assert!(labels[1].starts_with("package 0x"), "{labels:?}");
+}
+
 /// The nprime example from the VM repository, run for the first 50 primes
 /// and for the first 2, merged.
 #[test]

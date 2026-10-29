@@ -8,6 +8,8 @@
 
 use std::path::PathBuf;
 
+pub mod compare;
+pub mod diff;
 pub mod dump;
 pub mod filter;
 pub mod lcov;
@@ -17,7 +19,7 @@ pub mod source;
 pub mod summary;
 
 pub use filter::ReportFilter;
-pub use model::{BranchCoverage, FileCoverage, FunctionCoverage, Report, build_report};
+pub use model::{BranchCoverage, BranchKind, FileCoverage, FunctionCoverage, Report, build_report};
 pub use snapshot::Snapshot;
 pub use source::SourceResolver;
 
@@ -47,6 +49,14 @@ pub enum Error {
         run: String,
         /// Commitment of the missing package, in hex.
         commitment: String,
+    },
+    /// A baseline tracefile is not LCOV this crate can read.
+    #[error("invalid LCOV at line {line}: {reason}")]
+    InvalidLcov {
+        /// 1-based line of the tracefile.
+        line: usize,
+        /// What is wrong with it.
+        reason: String,
     },
     /// A file filter glob is malformed.
     #[error("invalid glob `{glob}`")]

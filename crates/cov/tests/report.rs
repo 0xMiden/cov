@@ -215,7 +215,7 @@ fn filtered_out_sources_are_not_unresolved() {
         |filter: &ReportFilter| report(&coverage, &mut SourceResolver::new(None, vec![]), filter);
     let unfiltered = report_with(&ReportFilter::default());
     assert_eq!(
-        unfiltered.unresolved.iter().collect::<Vec<_>>(),
+        unfiltered.unresolved.values().flatten().collect::<Vec<_>>(),
         [&source.display().to_string()]
     );
     let excluded = ReportFilter::new(&[], &["**/fixture.masm"]).unwrap();
@@ -258,11 +258,15 @@ fn unresolved_sources_are_listed_not_reported() {
         &ReportFilter::default(),
     );
     assert!(report.files.is_empty());
-    assert_eq!(report.unresolved.iter().collect::<Vec<_>>(), [&source.display().to_string()]);
+    // A program's procedures share no namespace but `$exec`, so the package
+    // is listed under its commitment.
+    let (package, paths) = report.unresolved.first_key_value().unwrap();
+    assert!(package.starts_with("package 0x"), "{package}");
+    assert_eq!(paths.iter().collect::<Vec<_>>(), [&source.display().to_string()]);
 
     let mut summary = Vec::new();
     miden_cov::summary::write(&report, &mut summary).unwrap();
     let summary = String::from_utf8(summary).unwrap();
     assert!(summary.contains("Unresolved sources:"));
-    assert!(summary.contains(&source.display().to_string()));
+    assert!(summary.contains(&format!("{package}: source file not found: {}", source.display())));
 }

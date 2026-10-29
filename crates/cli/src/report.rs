@@ -25,15 +25,18 @@ pub struct ReportArgs {
     lcov: Option<PathBuf>,
     /// Directory to resolve source paths against when they are not found
     /// as stored, for example a checkout of the library being measured.
+    ///
+    /// Only files under it, by default the current directory, are reported
+    /// unless `--include` is given.
     #[arg(long, value_name = "DIR")]
     source_root: Option<PathBuf>,
     /// Replace a prefix of stored source paths before resolving them, as
     /// `OLD=NEW`. May be given several times; the first matching one wins.
     #[arg(long = "path-prefix-map", value_name = "OLD=NEW", value_parser = parse_prefix_map)]
     path_prefix_maps: Vec<(String, String)>,
-    /// Report only source files matching this glob. May be given several
-    /// times; a file is kept if it matches any. Relative globs such as
-    /// `src/**` match paths relative to the current directory.
+    /// Report only source files matching this glob, wherever they are. May
+    /// be given several times; a file is kept if it matches any. Relative
+    /// globs such as `src/**` match paths relative to the source root.
     #[arg(long = "include", value_name = "GLOB")]
     includes: Vec<String>,
     /// Leave out source files matching this glob, even if included. May be
@@ -55,7 +58,13 @@ pub struct DumpArgs {
 
 /// Runs the `report` subcommand.
 pub fn report(args: ReportArgs) -> anyhow::Result<()> {
-    let filter = ReportFilter::new(&args.includes, &args.excludes)?;
+    let root = match &args.source_root {
+        Some(root) => root.clone(),
+        None => std::env::current_dir().context("cannot read the current directory")?,
+    };
+    let filter = ReportFilter::new(&args.includes, &args.excludes)?
+        .relative_to(&root)
+        .scoped_to(&root);
     let dir = match args.cov_dir {
         Some(dir) => CoverageDir::new(dir),
         None => CoverageDir::from_env_or_default(),
