@@ -37,3 +37,4 @@ jobs:
             const { publishForkCoverage } = require(process.env.GITHUB_WORKSPACE + '/.github/scripts/coverage-comment.js');
             // One call per report, naming the workflow whose runs upload its comment artifact.
             await publishForkCoverage({ github, context, core }, { name: 'rust', workflow: 'coverage.yml' });
+            await publishForkCoverage({ github, context, core }, { name: 'miden', workflow: 'miden-coverage.yml' });

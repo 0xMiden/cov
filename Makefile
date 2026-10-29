@@ -91,6 +91,27 @@ test-build: ## Build the test binaries for the workspace (no run)
 coverage: ## Measure the Rust code coverage of the test suite into rust-coverage.xml (Cobertura)
 	$(BACKTRACE) cargo llvm-cov nextest --workspace --profile $(NEXTEST_PROFILE) $(ALL_FEATURES) --ignore-filename-regex '/(tests|examples)/' --cobertura --output-path rust-coverage.xml $(EXTRA) $(EXPR)
 
+# The coverage of the Miden code of the example projects, measured the way a user measures their
+# contracts: the example's tests run with the coverage directory set, then `miden-cov report`,
+# built from this checkout, renders it. The directory is emptied first since one directory must
+# hold one build of the sources. BASELINE= (an LCOV of the base branch) and DIFF= (a unified diff
+# of the change) add the comparison; PAGE_URL= is where the page is published, for the comment.
+MIDEN_COV_DIR_OUT        := target/miden-cov
+MIDEN_COVERAGE_OUT       := target/miden-coverage
+MIDEN_COVERAGE_TITLE     := Miden code coverage
+MIDEN_COV                 = cargo run --locked --quiet -p miden-cov-cli -- report --cov-dir $(MIDEN_COV_DIR_OUT) --title "$(MIDEN_COVERAGE_TITLE)" $(if $(BASELINE),--baseline $(BASELINE)) $(if $(DIFF),--diff $(DIFF))
+
+.PHONY: miden-coverage
+miden-coverage: ## Measure the coverage of the examples' Miden code into target/miden-coverage (LCOV and HTML); accepts BASELINE= and DIFF=
+	rm -rf $(MIDEN_COV_DIR_OUT)
+	MIDEN_COV_DIR=$(CURDIR)/$(MIDEN_COV_DIR_OUT) $(BACKTRACE) cargo nextest run --profile $(NEXTEST_PROFILE) -p miden-cov-example-wallet $(EXTRA)
+	$(MIDEN_COV) --lcov $(MIDEN_COVERAGE_OUT)/lcov.info --html $(MIDEN_COVERAGE_OUT)/miden-coverage.html
+	@grep -q '^DA:[0-9]*,[1-9]' $(MIDEN_COVERAGE_OUT)/lcov.info || { echo 'error: the Miden coverage report has no hits' >&2; exit 1; }
+
+.PHONY: miden-coverage-comment
+miden-coverage-comment: ## Render the pull request comment of the last `make miden-coverage`; accepts BASELINE=, DIFF= and PAGE_URL=
+	$(MIDEN_COV) --no-summary --markdown $(MIDEN_COVERAGE_OUT)/coverage-comment.md $(if $(PAGE_URL),--page-url $(PAGE_URL))
+
 # --- checking ------------------------------------------------------------------------------------
 
 .PHONY: check

@@ -1,0 +1,129 @@
+# Measures the coverage of the Miden code of the example projects with miden-cov built from this
+# checkout and posts it on pull requests. This is the `miden` report: miden-cov renders the
+# comment and a single-page HTML report itself, and the comment goes through the same
+# publishing scripts as the `rust` report of `coverage.yml`. Pushes store the LCOV as the
+# baseline that pull requests compare against.
+name: miden-coverage
+
+on:
+  push:
+    branches: [main, next]
+  pull_request:
+    types: [opened, reopened, synchronize]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' || github.event_name == 'pull_request_target' }}
+
+permissions:
+  contents: read
+
+jobs:
+  coverage:
+    name: measure and render on ubuntu-latest
+    runs-on: ubuntu-latest
+    outputs:
+      has_report: ${{ steps.comment.outputs.has_report }}
+    permissions:
+      contents: read
+      actions: read # Find and download the baseline artifact of the base branch
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          # A pull request is checked out as its merge commit; its first parent is the base.
+          fetch-depth: 2
+      - name: Cleanup large tools for build space
+        uses: ./.github/actions/cleanup-runner
+      # Do not pin taiki-e's moving tool shortcut tags by hash. Pin a released
+      # install-action commit and set tool explicitly, or zizmor's
+      # impostor-commit audit can flag stale shortcut-tag hashes.
+      - name: Install nextest
+        uses: taiki-e/install-action@83ac0ad63c0167e6f06796fab0fce28db1bf3db0 # v2.87.22
+        with:
+          tool: cargo-nextest
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          shared-key: miden-coverage
+          save-if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/next' }}
+      - name: Install rust
+        run: rustup update --no-self-update
+      - name: Find the baseline
+        id: baseline
+        if: ${{ github.event_name == 'pull_request' }}
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            const findBaseline = require(process.env.GITHUB_WORKSPACE + '/.github/scripts/coverage-baseline.js');
+            await findBaseline({ github, context, core }, { name: 'miden', workflow: 'miden-coverage.yml' });
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        if: ${{ steps.baseline.outputs.run_id }}
+        with:
+          name: miden-coverage-lcov
+          path: ${{ runner.temp }}/baseline
+          run-id: ${{ steps.baseline.outputs.run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Diff the change
+        if: ${{ github.event_name == 'pull_request' }}
+        run: git diff HEAD^1 HEAD > "$RUNNER_TEMP/change.diff"
+      - name: Measure coverage
+        env:
+          BASELINE: ${{ steps.baseline.outputs.run_id && format('{0}/baseline/lcov.info', runner.temp) }}
+          DIFF: ${{ github.event_name == 'pull_request' && format('{0}/change.diff', runner.temp) || '' }}
+        run: make miden-coverage NEXTEST_PROFILE=ci BASELINE="$BASELINE" DIFF="$DIFF"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: miden-coverage-lcov
+          path: target/miden-coverage/lcov.info
+          if-no-files-found: error
+      # A single unzipped file, which the browser shows directly; the artifact takes its name.
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        id: page
+        if: ${{ github.event_name == 'pull_request' }}
+        with:
+          path: target/miden-coverage/miden-coverage.html
+          archive: false
+          if-no-files-found: error
+      - name: Render the pull request comment
+        id: comment
+        if: ${{ github.event_name == 'pull_request' }}
+        env:
+          BASELINE: ${{ steps.baseline.outputs.run_id && format('{0}/baseline/lcov.info', runner.temp) }}
+          DIFF: ${{ format('{0}/change.diff', runner.temp) }}
+          PAGE_URL: ${{ steps.page.outputs.artifact-url }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+        run: |
+          make miden-coverage-comment BASELINE="$BASELINE" DIFF="$DIFF" PAGE_URL="$PAGE_URL"
+          report_dir="$RUNNER_TEMP/miden-coverage-comment"
+          mkdir -p "$report_dir"
+          cp target/miden-coverage/coverage-comment.md "$report_dir/"
+          cat "$report_dir/coverage-comment.md" >> "$GITHUB_STEP_SUMMARY"
+          printf '%s\n%s\n%s\n' "$PR_NUMBER" "$PR_HEAD_SHA" "$PR_HEAD_REPO" > "$report_dir/coverage-pr-context.txt"
+          echo 'has_report=true' >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: ${{ github.event_name == 'pull_request' }}
+        with:
+          name: miden-coverage-comment
+          path: ${{ runner.temp }}/miden-coverage-comment/
+          if-no-files-found: error
+
+  coverage-comment:
+    name: attach the report to the pull request
+    needs: [coverage]
+    # Forks and Dependabot have read-only tokens; the scheduled publisher handles them.
+    if: >-
+      needs.coverage.outputs.has_report == 'true' &&
+      github.event_name == 'pull_request' &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.event.pull_request.user.login != 'dependabot[bot]'
+    permissions:
+      contents: read
+      actions: read # Read the report artifact
+      issues: write # Needed by GitHub to write a comment to the PR
+      pull-requests: write # Write the comment to the PR
+    uses: ./.github/workflows/coverage-comment.yml
+    with:
+      report: miden
+      run_id: ${{ github.run_id }}
