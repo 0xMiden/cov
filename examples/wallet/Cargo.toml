@@ -1,0 +1,24 @@
+[package]
+name = "miden-cov-example-wallet"
+description = "A user contract project whose MASM tests are measured with miden-cov"
+publish = false
+version.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+categories.workspace = true
+keywords.workspace = true
+license.workspace = true
+readme.workspace = true
+edition.workspace = true
+
+[lib]
+doctest = false
+
+[dependencies]
+miden-assembly = { workspace = true, features = ["std"] }
+miden-core-lib = { workspace = true, features = ["std"] }
+miden-cov-collector = { workspace = true, features = ["std"] }
+miden-processor = { workspace = true, features = ["std"] }

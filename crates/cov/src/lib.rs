@@ -4,20 +4,27 @@
 //! loads it and merges the runs, [`build_report`] applies the coverable rule
 //! with source files found by a [`SourceResolver`] and selected by a
 //! [`ReportFilter`], and the [`lcov`], [`summary`], and [`dump`] modules
-//! render the result. Nothing here executes a program.
+//! render the result. A pull request's report is set against its baseline
+//! and its change by [`compare`], and the [`html`] and [`markdown`] modules
+//! render that comparison as a self-contained page and a pull-request
+//! comment. Nothing here executes a program.
 
 use std::path::PathBuf;
 
+pub mod compare;
+pub mod diff;
 pub mod dump;
 pub mod filter;
+pub mod html;
 pub mod lcov;
+pub mod markdown;
 pub mod model;
 pub mod snapshot;
 pub mod source;
 pub mod summary;
 
 pub use filter::ReportFilter;
-pub use model::{BranchCoverage, FileCoverage, FunctionCoverage, Report, build_report};
+pub use model::{BranchCoverage, BranchKind, FileCoverage, FunctionCoverage, Report, build_report};
 pub use snapshot::Snapshot;
 pub use source::SourceResolver;
 
@@ -47,6 +54,14 @@ pub enum Error {
         run: String,
         /// Commitment of the missing package, in hex.
         commitment: String,
+    },
+    /// A baseline tracefile is not LCOV this crate can read.
+    #[error("invalid LCOV at line {line}: {reason}")]
+    InvalidLcov {
+        /// 1-based line of the tracefile.
+        line: usize,
+        /// What is wrong with it.
+        reason: String,
     },
     /// A file filter glob is malformed.
     #[error("invalid glob `{glob}`")]

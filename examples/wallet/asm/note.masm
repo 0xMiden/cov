@@ -1,0 +1,11 @@
+#! A note that pays out of the wallet that consumes it.
+
+use example::wallet
+
+#! Pays an amount out of a balance through the wallet.
+#!
+#! Inputs:  [amount, balance]
+#! Outputs: [balance']
+pub proc pay
+    call.wallet::withdraw
+end

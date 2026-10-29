@@ -2,29 +2,18 @@
 
 use std::io::{self, Write};
 
-use crate::{Report, source::display_relative};
+use crate::{Report, compare::Totals, source::display_relative};
 
 /// Writes a per-file table of line, function, and branch coverage with a
-/// total row, followed by the stored paths that could not be resolved.
+/// total row, followed by one line per package with stored paths that could
+/// not be resolved.
 pub fn write(report: &Report, out: &mut dyn Write) -> io::Result<()> {
-    let mut rows: Vec<(String, Counts)> = report
+    let mut rows: Vec<(String, Totals)> = report
         .files
         .values()
-        .map(|file| {
-            let counts = Counts {
-                lines: Ratio::of(file.lines.values().copied()),
-                functions: Ratio::of(file.functions.iter().map(|f| f.count)),
-                branches: Ratio::of(file.branches.iter().flat_map(|b| b.arms)),
-            };
-            (display_relative(&file.path), counts)
-        })
+        .map(|file| (display_relative(&file.path), Totals::of(file)))
         .collect();
-    let total = rows.iter().fold(Counts::default(), |total, (_, counts)| Counts {
-        lines: total.lines.add(counts.lines),
-        functions: total.functions.add(counts.functions),
-        branches: total.branches.add(counts.branches),
-    });
-    rows.push(("TOTAL".into(), total));
+    rows.push(("TOTAL".into(), Totals::of_report(report)));
 
     let header = ["File", "Lines", "Functions", "Branches"];
     let cells: Vec<[String; 4]> = rows
@@ -67,52 +56,9 @@ pub fn write(report: &Report, out: &mut dyn Write) -> io::Result<()> {
     if !report.unresolved.is_empty() {
         writeln!(out)?;
         writeln!(out, "Unresolved sources:")?;
-        for path in &report.unresolved {
-            writeln!(out, "  {path}")?;
+        for line in report.unresolved_summary() {
+            writeln!(out, "  {line}")?;
         }
     }
     Ok(())
-}
-
-/// Hit and total counts of one file or of the whole report.
-#[derive(Debug, Clone, Copy, Default)]
-struct Counts {
-    lines: Ratio,
-    functions: Ratio,
-    branches: Ratio,
-}
-
-/// How many of `total` items were hit.
-#[derive(Debug, Clone, Copy, Default)]
-struct Ratio {
-    hit: usize,
-    total: usize,
-}
-
-impl Ratio {
-    /// Counts the non-zero entries of `counts`.
-    fn of(counts: impl Iterator<Item = u64>) -> Self {
-        counts.fold(Self::default(), |ratio, count| Self {
-            hit: ratio.hit + usize::from(count > 0),
-            total: ratio.total + 1,
-        })
-    }
-
-    fn add(self, other: Self) -> Self {
-        Self {
-            hit: self.hit + other.hit,
-            total: self.total + other.total,
-        }
-    }
-}
-
-impl core::fmt::Display for Ratio {
-    /// `hit/total  pct%`, or `-` when there is nothing to cover.
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        if self.total == 0 {
-            return write!(f, "-");
-        }
-        let percent = 100.0 * self.hit as f64 / self.total as f64;
-        write!(f, "{}/{} {percent:5.1}%", self.hit, self.total)
-    }
 }

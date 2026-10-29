@@ -26,6 +26,9 @@ latest = true
 assets = ["miden-cov-*.tar.gz"]
 required-assets = ["miden-cov-*.tar.gz"]
 
+[units.examples]
+kind = "private"
+
 # --- cov unit -----------------------------------------------------------------
 # Listed in dependency order. The publication order itself is derived by
 # `release-tool package-order`, not taken from this list.
@@ -41,3 +44,11 @@ unit = "cov"
 [[packages]]
 name = "miden-cov-cli"
 unit = "cov"
+
+# --- examples unit ------------------------------------------------------------
+# Never published: simulated user projects whose tests rehearse measuring the
+# coverage of their MASM.
+
+[[packages]]
+name = "miden-cov-example-wallet"
+unit = "examples"

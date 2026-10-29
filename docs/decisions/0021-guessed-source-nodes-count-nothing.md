@@ -1,6 +1,6 @@
 # 0021: A guessed source node counts nothing; a touched package is always reported
 
-Status: accepted (2026-10-22). Restates the ambiguous-entry gap of 0018.
+Status: accepted (2026-10-22). Restates the ambiguous-entry gap of 0018. The reporting of touched packages is narrowed to the source root by [0024](0024-report-scope-is-the-source-root.md).
 
 ## Context
 

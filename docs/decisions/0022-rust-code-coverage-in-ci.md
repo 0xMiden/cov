@@ -1,6 +1,6 @@
 # 0022: Rust code coverage in CI, keyed by report name
 
-Status: accepted (2026-10-28).
+Status: accepted (2026-10-28); the consequence on a second octocov report is superseded by [0023](0023-miden-cov-renders-the-pull-request-report.md).
 
 ## Context
 

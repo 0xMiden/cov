@@ -23,8 +23,9 @@ Coverage flows through four stages, each handing a plain artifact to the next.
    attempts: a failing row counts, and so does the edge of a `call` whose
    callee is never found. A cycle whose source the engine could only guess
    is counted as a cycle and marks its package as touched, nothing more. A
-   package with debug info that the execution passed through is reported
-   whether or not anything in it was attributed. Invariant: a guessed source
+   package with debug info that the execution passed through is recorded, and
+   reported when its files are in the report scope, whether or not anything
+   in it was attributed. Invariant: a guessed source
    is never a hit; coverage may be lost, never invented. The one exception,
    accepted until the record names a guessed parent, is the edge from such a
    parent to a tracked child, which no count of the report reads.
@@ -32,8 +33,11 @@ Coverage flows through four stages, each handing a plain artifact to the next.
    counts, and each package appears once with its forest and debug info. The
    directory is the only link between collecting and reporting.
 4. **Reporting.** The reporter merges any number of run files, resolves the
-   source files, applies the coverable rule, and writes LCOV for genhtml,
-   octocov, and editor gutters, a terminal summary, and a JSON view for agents.
+   source files, applies the coverable rule, and writes LCOV for genhtml and
+   editor gutters, a terminal summary, a JSON view for agents, a single-page
+   HTML report, and a pull request comment. The page and the comment can set
+   the report against a baseline, the LCOV of the base branch, and a change,
+   a unified diff, to mark changed lines and show what moved.
 
 Collection and reporting never run in the same step. Runs from different
 processes or machines merge by landing in the same directory.
@@ -49,8 +53,8 @@ processes or machines merge by landing in the same directory.
   engine is the only reader of the VM's continuation stream: the collector
   never interprets continuations itself.
 - **cov**: reads a coverage directory, merges runs, resolves source files,
-  computes line, function, and branch coverage, and writes the output formats.
-  It never executes anything.
+  computes line, function, and branch coverage, compares it with a baseline
+  and a change, and writes the output formats. It never executes anything.
 - **cli**: the `miden-cov` binary. `run` loads and links a package through the
   debugger engine, drives the engine's stepper with the collector attached, and
   writes a run file. `report` and `dump` are thin fronts over the cov crate.
@@ -180,8 +184,11 @@ Locations are byte ranges in files identified by path, as recorded at build
 time. Those paths may be absolute from another machine or trimmed and relative.
 The reporter resolves them against the current directory, a user-supplied
 source root, and user-supplied prefix mappings, in that order. A file that
-cannot be found is listed in the summary and skipped; it never aborts the
-report.
+cannot be found is skipped; it never aborts the report. Unresolved files are
+summarized one line per package with the directory their paths share, which
+is what a prefix mapping needs. Coverage directories record no package
+names, so the label is derived from the package's own procedures, and all
+programs share one.
 
 ## Test-suite activation
 
@@ -211,19 +218,32 @@ waits for the debugger to follow.
 
 ## Report scope
 
-Every package with debug info that a run touched is reported, including
-linked libraries whose sources resolve. Include and exclude path globs narrow the report; there is no
-implicit notion of "the user's package", because for library coverage the
-library is the target.
+By default a file is reported only when it resolves under the source root,
+so dependencies resolved from elsewhere, such as a package registry or a
+toolchain, drop out. Include globs replace that scope and may name files
+anywhere; exclude globs narrow either. There is no implicit notion of "the
+user's package": for library coverage the library's own checkout is the
+source root, and its sources are in scope.
 
 ## Output policy
 
-LCOV is the primary format and the only one the MVP writes. It is the common
-input of genhtml, octocov, Codecov, Coveralls, and editor coverage gutters.
-Line, function, and branch records are all emitted. Pull request comments, the
-rendered HTML, and its storage as a workflow artifact all come from octocov;
-miden-cov renders nothing itself. A JSON format sized for agents lists
-uncovered regions grouped by function with per-test attribution.
+LCOV is the primary format. It is the common input of genhtml, Codecov,
+Coveralls, and editor coverage gutters, and the format of a baseline. Line,
+function, and branch records are all emitted. A JSON format sized for agents
+lists uncovered regions grouped by function with per-test attribution.
+
+The pull request report of Miden code, a single HTML page and a comment, is
+rendered by miden-cov itself, because the off-the-shelf renderers read only
+line records and drop branch and function coverage. octocov is not used for
+Miden code. The page shows every reported file whole, files the change
+touched first, with a guard on its total size rather than per-file limits.
+
+- Invariant: the page escapes all embedded source text and paths, which are
+  untrusted.
+- Invariant: the page is self-contained, with no relative references and no
+  external URLs except the links back it is given.
+- Invariant: the comment stays under the size cap of the comment publishing
+  pipeline, by shortening its lists.
 
 ## Documentation policy
 

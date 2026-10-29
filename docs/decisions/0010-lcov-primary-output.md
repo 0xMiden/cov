@@ -1,6 +1,6 @@
 # 0010: LCOV is the primary output; octocov for PR comments
 
-Status: accepted (2026-10-19)
+Status: accepted (2026-10-19); the pull request part and its note are superseded by [0023](0023-miden-cov-renders-the-pull-request-report.md)
 
 ## Context
 

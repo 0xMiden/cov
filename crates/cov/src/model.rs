@@ -27,8 +27,81 @@ use crate::{
 pub struct Report {
     /// Files keyed by the display form of their canonical resolved path.
     pub files: BTreeMap<String, FileCoverage>,
-    /// Stored debug-info paths that no file was found for.
-    pub unresolved: BTreeSet<String>,
+    /// Stored debug-info paths that no file was found for, by the label of
+    /// each package that refers to them (see [`package_label`]).
+    pub unresolved: BTreeMap<String, BTreeSet<String>>,
+}
+
+impl Report {
+    /// One line per package with unresolved paths: how many source files
+    /// were not found and the directory they have in common, which is the
+    /// `OLD` prefix a `--path-prefix-map` needs.
+    pub fn unresolved_summary(&self) -> Vec<String> {
+        self.unresolved
+            .iter()
+            .map(|(package, paths)| match (paths.len(), common_dir(paths)) {
+                (1, _) => format!("{package}: source file not found: {}", paths.first().unwrap()),
+                (n, Some(dir)) => format!("{package}: {n} source files not found under {dir}"),
+                (n, None) => {
+                    format!(
+                        "{package}: {n} source files not found, e.g. {}",
+                        paths.first().unwrap()
+                    )
+                },
+            })
+            .collect()
+    }
+}
+
+/// The longest directory, with a trailing `/`, that every one of `paths`
+/// lies under, or `None` when they share none.
+fn common_dir(paths: &BTreeSet<String>) -> Option<String> {
+    // In sorted order the first and the last path differ the most.
+    let (first, last) = (paths.first()?, paths.last()?);
+    let shared = first.bytes().zip(last.bytes()).take_while(|(a, b)| a == b).count();
+    // `/` is one byte in UTF-8, so the slice ends on a character boundary.
+    let end = first.as_bytes()[..shared].iter().rposition(|byte| *byte == b'/')?;
+    let dir = &first[..=end];
+    (dir != "/" && !dir.is_empty()).then(|| dir.to_owned())
+}
+
+/// The label a package is listed under: the namespace its function names
+/// share, such as `miden::core`, `programs` for every program, or the start
+/// of its commitment when they share none.
+///
+/// Coverage directories do not record package names. A test suite runs many
+/// programs, each a package of its own, and they share one label so that
+/// their unresolved sources, such as the virtual file of an inline test
+/// program, are listed once.
+pub fn package_label(package: &PackageFile) -> String {
+    let debug_info = &package.debug_info;
+    // Records of procedures imported from other packages have no tree here.
+    let mut names = debug_info
+        .functions()
+        .iter()
+        .filter(|function| function.source_node.into_option().is_some())
+        .filter_map(|function| debug_info.get_string(function.name_idx));
+    let namespace = names.next().map(|first| {
+        let mut shared: Vec<String> = segments(&first).map(str::to_owned).collect();
+        // The last segment is the procedure's own name.
+        shared.pop();
+        for name in names {
+            let common = shared.iter().zip(segments(&name)).take_while(|(a, b)| a == b).count();
+            shared.truncate(common);
+        }
+        shared.join("::")
+    });
+    match namespace {
+        // `$exec` is the namespace of every program.
+        Some(namespace) if namespace.starts_with("$exec") => "programs".to_owned(),
+        Some(namespace) if !namespace.is_empty() => namespace,
+        _ => format!("package {}", &package.commitment.to_hex()[..10]),
+    }
+}
+
+/// The `::`-separated segments of a procedure path, without a leading `::`.
+fn segments(name: &str) -> impl Iterator<Item = &str> {
+    name.trim_start_matches("::").split("::")
 }
 
 /// Coverage of one source file.
@@ -68,6 +141,18 @@ pub struct BranchCoverage {
     /// Times each arm was taken: `[true arm, false arm]`. For a loop guard
     /// these are the times the condition held and failed.
     pub arms: [u64; 2],
+    /// The instruction introducing the branch, or `None` when unknown, as
+    /// for a branch read back from LCOV.
+    pub kind: Option<BranchKind>,
+}
+
+/// The instruction a branch comes from, which gives its arms their meaning.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BranchKind {
+    /// An `if.true`: the arms are the true and the false block.
+    If,
+    /// A `while.true`: the arms are the iterations and the exits.
+    While,
 }
 
 /// A source location: the key of its file (see [`Files::key`]) and its byte
@@ -90,7 +175,8 @@ pub fn build_report(
         filter,
         keys: BTreeMap::new(),
         reported: BTreeMap::new(),
-        unresolved: BTreeSet::new(),
+        package: Arc::from(""),
+        unresolved: BTreeMap::new(),
     };
     // Each row is one copy of an instruction: the assembler copies a
     // procedure's tree at every place it is inlined, and each copy keeps the
@@ -130,6 +216,7 @@ pub fn build_report(
     // package or across packages, cannot be credited.
     let mut owners: BTreeMap<Word, BTreeMap<FunctionKey, (Word, u32)>> = BTreeMap::new();
     for (commitment, package) in &views {
+        files.package = package.label.clone();
         for (idx, function) in package.package.debug_info.functions().iter().enumerate() {
             if package.canonical[idx] != idx as u32 {
                 continue;
@@ -149,6 +236,7 @@ pub fn build_report(
     let mut call_entries: BTreeMap<(Word, u32), u64> = BTreeMap::new();
 
     for (commitment, package) in &views {
+        files.package = package.label.clone();
         let debug_info = &package.package.debug_info;
 
         for (node_id, node) in debug_info.nodes().iter().enumerate() {
@@ -168,6 +256,7 @@ pub fn build_report(
             {
                 let branch = branches.entry(files.location_key(&location)).or_default();
                 branch.executed |= package.starts(node_id) > 0;
+                branch.kind = Some(split.kind);
                 for (total, arm) in branch.arms.iter_mut().zip(split.arms) {
                     *total += arm;
                 }
@@ -205,6 +294,7 @@ pub fn build_report(
     }
 
     for (commitment, package) in &views {
+        files.package = package.label.clone();
         let debug_info = &package.package.debug_info;
         // Entries into a function through the inlined copies of its own package.
         let inline_entries = package.inline_entries();
@@ -255,13 +345,14 @@ pub fn build_report(
             *hit = (*hit).max(*count);
         }
     }
-    for ((key, start, _), BranchTally { executed, arms }) in branches {
+    for ((key, start, _), BranchTally { executed, arms, kind }) in branches {
         if let Some(file) = reported.get_mut(&key) {
             file.coverage.branches.push(BranchCoverage {
                 line: file.source.line_of(start),
                 block: start,
                 executed,
                 arms,
+                kind,
             });
         }
     }
@@ -308,6 +399,8 @@ struct PackageView<'a> {
     /// For each canonical record, every name it and its re-exports go by;
     /// empty for the other records.
     names: Vec<Vec<Arc<str>>>,
+    /// What the package is listed under, see [`package_label`].
+    label: Arc<str>,
 }
 
 impl<'a> PackageView<'a> {
@@ -339,7 +432,13 @@ impl<'a> PackageView<'a> {
                     .filter_map(|idx| debug_info.get_string(idx)),
             );
         }
-        Self { package, hits, canonical, names }
+        Self {
+            package,
+            hits,
+            canonical,
+            names,
+            label: package_label(package).into(),
+        }
     }
 
     /// The identity of the record `function`, if it names a file: the key the
@@ -534,12 +633,17 @@ impl<'a> PackageView<'a> {
         {
             let iterations = self.starts_from(then_arm.into(), body);
             return Some(Split {
+                kind: BranchKind::While,
                 arms: [iterations, entered],
                 evaluations: iterations + entered,
             });
         }
         let arms = [self.starts_from(node_id, then_arm), self.starts_from(node_id, else_arm)];
-        Some(Split { arms, evaluations: entered })
+        Some(Split {
+            kind: BranchKind::If,
+            arms,
+            evaluations: entered,
+        })
     }
 
     /// The location whose count is the number of times a function ran: the
@@ -577,7 +681,18 @@ impl<'a> PackageView<'a> {
             // A split is entered once per entry of the function, but its
             // arms run conditionally; loop bodies run once per iteration.
             Some(MastNode::Split(_)) => ControlFlow::Break(own_rows.next()),
-            _ => ControlFlow::Break(None),
+            // The search stops only at a conditional or a loop. A `call`,
+            // `syscall`, `dyncall`, `dynexec`, or `exec` of another package
+            // runs once per entry, has no coverable row, and reaches another
+            // procedure's body, so the search goes on past it. Stopping here
+            // would leave the fallback, which misses a body entered by a
+            // `call` that is the caller's root entered through an external
+            // node: that root's start is never seen, so its children have no
+            // parent and the `call`'s edge is never recorded.
+            Some(MastNode::Call(_) | MastNode::Dyn(_) | MastNode::External(_)) => {
+                ControlFlow::Continue(())
+            },
+            Some(MastNode::Loop(_)) | None => ControlFlow::Break(None),
         }
     }
 }
@@ -587,12 +702,17 @@ impl<'a> PackageView<'a> {
 struct Files<'a> {
     resolver: &'a mut SourceResolver,
     filter: &'a ReportFilter,
-    /// The key of every stored path seen so far.
-    keys: BTreeMap<String, Arc<str>>,
+    /// The key of every stored path seen so far, and whether the path is
+    /// unresolved and kept by the filter.
+    keys: BTreeMap<String, (Arc<str>, bool)>,
     /// Files that resolve and are kept by the filter, by key.
     reported: BTreeMap<Arc<str>, ReportedFile>,
-    /// Stored paths that do not resolve and are kept by the filter.
-    unresolved: BTreeSet<String>,
+    /// The label of the package whose records are being read, which an
+    /// unresolved path is listed under.
+    package: Arc<str>,
+    /// Stored paths that do not resolve and are kept by the filter, by
+    /// package label.
+    unresolved: BTreeMap<String, BTreeSet<String>>,
 }
 
 /// A file of the report with its text.
@@ -610,10 +730,34 @@ impl Files<'_> {
     /// packages were built on different machines or from different
     /// directories; they share a key.
     fn key(&mut self, stored_path: &str) -> Arc<str> {
-        if let Some(key) = self.keys.get(stored_path) {
-            return key.clone();
+        let (key, unresolved) = match self.keys.get(stored_path) {
+            Some(known) => known.clone(),
+            None => {
+                let known = self.resolve(stored_path);
+                self.keys.insert(stored_path.to_owned(), known.clone());
+                known
+            },
+        };
+        // Every package that refers to the path lists it, not only the first.
+        if unresolved
+            && !self
+                .unresolved
+                .get(&*self.package)
+                .is_some_and(|paths| paths.contains(stored_path))
+        {
+            self.unresolved
+                .entry(self.package.to_string())
+                .or_default()
+                .insert(stored_path.to_owned());
         }
-        let key: Arc<str> = match self.resolver.resolve(stored_path) {
+        key
+    }
+
+    /// The key of `stored_path` and whether it is an unresolved path the
+    /// filter keeps, adding the file to the report when it resolves and the
+    /// filter keeps it.
+    fn resolve(&mut self, stored_path: &str) -> (Arc<str>, bool) {
+        match self.resolver.resolve(stored_path) {
             Some(source) => {
                 let key: Arc<str> = absolute_path(&source.path).display().to_string().into();
                 if self.filter.keeps(&source.path) {
@@ -625,17 +769,10 @@ impl Files<'_> {
                         source,
                     });
                 }
-                key
+                (key, false)
             },
-            None => {
-                if self.filter.keeps(Path::new(stored_path)) {
-                    self.unresolved.insert(stored_path.to_owned());
-                }
-                stored_path.into()
-            },
-        };
-        self.keys.insert(stored_path.to_owned(), key.clone());
-        key
+            None => (stored_path.into(), self.filter.keeps_unresolved(Path::new(stored_path))),
+        }
     }
 
     /// The key of `location`.
@@ -646,6 +783,8 @@ impl Files<'_> {
 
 /// The condition counts of one split node.
 struct Split {
+    /// Whether the split is an `if.true` or guards a loop.
+    kind: BranchKind,
     /// Times each arm was taken: `[true arm, false arm]`.
     arms: [u64; 2],
     /// Times the condition was evaluated.
@@ -657,6 +796,7 @@ struct Split {
 struct BranchTally {
     executed: bool,
     arms: [u64; 2],
+    kind: Option<BranchKind>,
 }
 
 /// The copies of one function seen so far.
@@ -668,4 +808,35 @@ struct FunctionTally {
     /// Starts of the function's own root, entries of its inlined copies, and
     /// edges of the `call`s to it, summed over the packages of the snapshot.
     starts: u64,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn unresolved_paths_are_summarized_per_package() {
+        let mut report = Report::default();
+        let mut add = |package: &str, paths: &[&str]| {
+            report
+                .unresolved
+                .insert(package.into(), paths.iter().map(|path| path.to_string()).collect());
+        };
+        add("miden::core", &["/ci/core/asm/sys/b.masm", "/ci/core/asm/a.masm"]);
+        add("one", &["/ci/one.masm"]);
+        // `/ci/core/asm/s` is a common string prefix but not a directory.
+        add("siblings", &["/ci/core/asm/sa.masm", "/ci/core/asm/sb.masm"]);
+        add("scattered", &["/a.masm", "/b/c.masm"]);
+        add("relative", &["w.masm", "x/w.masm"]);
+        assert_eq!(
+            report.unresolved_summary(),
+            [
+                "miden::core: 2 source files not found under /ci/core/asm/",
+                "one: source file not found: /ci/one.masm",
+                "relative: 2 source files not found, e.g. w.masm",
+                "scattered: 2 source files not found, e.g. /a.masm",
+                "siblings: 2 source files not found under /ci/core/asm/",
+            ]
+        );
+    }
 }
