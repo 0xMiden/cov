@@ -1945,6 +1945,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "miden-cov-example-wallet"
+version = "0.1.0"
+dependencies = [
+ "miden-assembly",
+ "miden-core-lib",
+ "miden-cov-collector",
+ "miden-processor",
+]
+
+[[package]]
 name = "miden-crypto"
 version = "0.36.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"

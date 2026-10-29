@@ -1,0 +1,12 @@
+#! The kernel of the example project, standing in for the transaction kernel.
+
+#! The flat fee charged on every withdrawal.
+const FEE = 3
+
+#! Adds the withdrawal fee to an amount.
+#!
+#! Inputs:  [amount]
+#! Outputs: [amount + FEE]
+pub proc apply_fee
+    add.FEE
+end

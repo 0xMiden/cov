@@ -1,0 +1,66 @@
+#! A wallet holding a single balance.
+
+#! Asks the host to quote the price of the asset on top of the stack.
+const PRICE_REQUEST = event("example::wallet::price_request")
+
+#! Adds a deposit to a balance; a zero deposit leaves the balance untouched.
+#!
+#! Inputs:  [amount, balance]
+#! Outputs: [balance']
+pub proc deposit
+    dup eq.0
+    if.true
+        drop
+    else
+        add
+    end
+end
+
+#! Deposits the same amount `count` times.
+#!
+#! Inputs:  [count, amount, balance]
+#! Outputs: [balance']
+pub proc deposit_many
+    dup neq.0
+    while.true
+        sub.1 movdn.2
+        # => [amount, balance, count - 1]
+        dup movdn.3
+        # => [amount, balance, count - 1, amount]
+        exec.deposit movdn.2
+        # => [count - 1, amount, balance']
+        dup neq.0
+    end
+    drop drop
+end
+
+#! Withdraws an amount plus the kernel's fee from a balance.
+#!
+#! Inputs:  [amount, balance]
+#! Outputs: [balance']
+#!
+#! Panics if the balance does not cover the amount and the fee.
+pub proc withdraw
+    syscall.apply_fee
+    # => [amount + fee, balance]
+    dup.1 dup.1 u32gte assert.err="insufficient funds"
+    sub
+end
+
+#! Reads the spending limit stored in the advice map under a key.
+#!
+#! Inputs:  [KEY]
+#! Outputs: [limit]
+pub proc spending_limit
+    adv.push_mapval dropw adv_push
+end
+
+#! Values an amount of an asset at the price the host quotes for it.
+#!
+#! Inputs:  [asset, amount]
+#! Outputs: [value]
+pub proc value_of
+    emit.PRICE_REQUEST adv_push
+    # => [price, asset, amount]
+    swap drop mul
+end
