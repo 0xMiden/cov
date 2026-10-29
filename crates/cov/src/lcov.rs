@@ -55,7 +55,7 @@ pub fn write(report: &Report, out: &mut dyn Write) -> io::Result<()> {
     Ok(())
 }
 
-/// Reads a tracefile as [`write`] writes it back into a report keyed by the
+/// Reads a tracefile as [`write()`] writes it back into a report keyed by the
 /// `SF` paths.
 ///
 /// Line (`DA`), function (`FN`, `FNDA`), and two-way branch (`BRDA`) records
